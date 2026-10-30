@@ -90,4 +90,44 @@ if not refused or "continue;" not in refused.group(1):
 if "tried.insert(candidate_spec);" not in loop[:loop.index("try {")]:
     raise SystemExit("a refused candidate is not recorded as tried")
 
+# The PRP -use tuner: every probe runs in a tuning context, never on the production one.
+use = body("std::vector<KeyVal> selectPrpUse(")
+for bad in ("PrpUseProbe base(exponent,regs,shared,", "PrpUseProbe candidate(exponent,regs,shared,",
+            "PrpUseProbe probe(exponent,regs,shared,", "Gpu::make(exponent,shared,"):
+    if bad in use:
+        raise SystemExit(f"the PRP -use tuner runs a probe on the production OpenCL context: {bad}")
+if "tune.emplace(shared.context->deviceId(),shared)" not in use:
+    raise SystemExit("the PRP -use tuner has no tuning context of its own")
+if use.count("tuning()") < 5:
+    raise SystemExit("not every PRP -use probe runs in the tuning context")
+# A probe that fails is not an ordinary rejection: it stops the search and is logged as a failure.
+if re.search(r"catch\(const std::exception& e\)\{[^}]*AEVUM_USE_REJECT", use):
+    raise SystemExit("an engine error in the PRP -use tuner is still logged as a rejection")
+if "struct UseRejected : std::runtime_error" not in engine:
+    raise SystemExit("no distinct exception for a PRP -use profile that fails a tuner gate")
+for gate in ('UseRejected("WORD MISMATCH")', 'UseRejected("ROE gate")', 'UseRejected("invalid PRP timing/check")'):
+    if gate not in use:
+        raise SystemExit(f"tuner gate is not a UseRejected: {gate}")
+if use.count("if(!ok && !failure.empty()){report_failure();progress.interrupted=true;break;}") != 2:
+    raise SystemExit("a failed PRP -use probe does not stop both the screening and the finalist loop")
+if "AEVUM_USE_FAIL" not in use:
+    raise SystemExit("a failed PRP -use probe is not reported as a failure")
+if "if(failure.empty() && state.next_screen==planned)" not in use:
+    raise SystemExit("the finalists run on a tuning context that has just failed")
+if "if(!failure.empty())progress.interrupted=true;" not in use:
+    raise SystemExit("a PRP -use search stopped by an engine error makes a lasting decision")
+
+# The CUDA ZEROHACK_W selector benchmarks in a tuning context as well.
+zero = body("std::vector<KeyVal> selectCudaZeroHack(")
+if "PrpUseProbe base(exponent,regs,tune.shared,fft,w1);" not in zero or \
+   "PrpUseProbe candidate(exponent,regs,tune.shared,fft,w0);" not in zero:
+    raise SystemExit("the CUDA ZEROHACK_W selector benchmarks on the production context")
+
+# The probe enables the lead cache exactly where the production Runtime does.
+probe = engine[engine.index("class PrpUseProbe {"):engine.index("struct PlanProductionConfirmation")]
+if "regSupportsLeadCache" in probe:
+    raise SystemExit("PrpUseProbe decides the lead cache itself, ignoring AEVUM_REG_LEAD_CACHE and the PFA gate")
+if "productionRegPaths(*gpu_, fft," not in probe:
+    raise SystemExit("PrpUseProbe does not take the lead cache from productionRegPaths")
+
 print("engine_autotune_isolation_test: OK")

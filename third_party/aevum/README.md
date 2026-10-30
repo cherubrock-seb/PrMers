@@ -80,7 +80,7 @@ They are checked by the plan-policy test at the exact boundaries.
 | Radix 9 | 653,808,129–725,153,152 | `pfa9:1:1K:9:1K:202` | 18,874,368 | 1.778x |
 | Radix 3 | 725,153,153–965,612,672 | `pfa3:1:4K:3:1K:101` | 25,165,824 | 1.333x |
 | Radix 9 | 1,295,872,129–1,440,869,120 | `pfa9:1:4K:9:512:202` | 37,748,736 | 1.778x |
-| Radix 9 | 2,574,967,041–2,862,863,872 | `pfa9:1:4K:9:1K:202` | 75,497,472 | 1.778x |
+| Radix 9 | 2,574,967,041–2,787,366,400 | `pfa9:1:4K:9:1K:202` | 75,497,472 | 1.778x |
 
 All other admissible exponent ranges use the normal power-of-two Aevum plan.
 The automatic gates are `1.30x` for radix 3 and `1.60x` for radix 9.

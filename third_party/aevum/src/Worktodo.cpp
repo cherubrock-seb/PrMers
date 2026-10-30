@@ -6,6 +6,7 @@
 #include "File.h"
 #include "common.h"
 #include "Args.h"
+#include "FFTConfig.h"
 #include "fs.h"
 
 #include <cassert>
@@ -92,11 +93,44 @@ std::optional<Task> parse(const std::string& line) {
   return {};
 }
 
+// Return false only when a normal explicit FFT plan is known to be outside
+// its valid exponent range. Pseudo-selectors and unrelated configuration
+// errors retain their existing execution-time behavior.
+static bool forcedFftCanRun(const Args& args, const Task& task) {
+  if (args.fftSpec.empty()) return true;
+
+  try {
+    // A normal explicit plan parses as an FFTConfig directly. Pseudo-selectors
+    // such as throughput:auto do not and intentionally bypass this preflight.
+    FFTConfig raw{args.fftSpec};
+    (void) raw;
+  } catch (...) {
+    return true;
+  }
+
+  try {
+    (void) FFTConfig::bestFit(args, task.exponent, args.fftSpec);
+    return true;
+  } catch (const std::runtime_error& e) {
+    const string message = e.what();
+    const bool capacity =
+        message.find("too large for exponent") != string::npos ||
+        message.find("too small for exponent") != string::npos;
+
+    if (!capacity) throw;
+
+    log("Forced FFT %s cannot run worktodo line \"%s\"; skipping it.\n",
+        args.fftSpec.c_str(), rstripNewline(task.line).c_str());
+    return false;
+  }
+}
+
 // Among the valid tasks from fileName, return the "best" which means the smallest CERT, or otherwise the exponent PRP/LL
-static std::optional<Task> bestTask(const fs::path& fileName, bool smallest) {
+static std::optional<Task> bestTask(const Args& args, const fs::path& fileName, bool smallest) {
   optional<Task> best;
   for (const string& line : File::openRead(fileName)) {
     optional<Task> task = parse(line);
+    if (task && !forcedFftCanRun(args, *task)) continue;
     if (task && (!best
                  || (best->kind != Task::CERT && task->kind == Task::CERT)
                  || ((best->kind != Task::CERT || task->kind == Task::CERT) && smallest && task->exponent < best->exponent))) {
@@ -113,7 +147,7 @@ optional<Task> getWork(Args& args, i32 instance) {
   fs::path localWork = filename;
 
   // Try to get a task from the local worktodo-<N> file.
-  if (optional<Task> task = bestTask(localWork, args.smallest)) { return task; }
+  if (optional<Task> task = bestTask(args, localWork, args.smallest)) { return task; }
 
   if (args.masterDir.empty()) { log("No work to do found.  Add work to %s.\n", filename.c_str()); return {}; }
 
@@ -142,7 +176,7 @@ optional<Task> getWork(Args& args, i32 instance) {
     u64 initialSize = fileSize(worktodo);
     if (!initialSize) { return {}; }
 
-    optional<Task> task = bestTask(worktodo, args.smallest);
+    optional<Task> task = bestTask(args, worktodo, args.smallest);
     if (!task) { return {}; }
 
     string workLine = task->line;

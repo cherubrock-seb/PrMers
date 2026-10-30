@@ -11,7 +11,7 @@
 # make all DEBUG=1 CXX=g++-12
 
 HOST_OS = $(shell uname -s)
-AEVUM_VERSION ?= v0.3.108-pass5-prp-max
+AEVUM_VERSION ?= v0.3.110-pass5-prp-max
 MACOSX_DEPLOYMENT_TARGET ?= 12.0
 
 # Use the platform default C++20 compiler.  On macOS, /usr/bin/c++ is
@@ -129,6 +129,11 @@ test-small-factor-gpu: engine-lib
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) tests/engine_small_factor_gpu_test.cpp $(DL_LIBS) -o build-tests/aevum-engine-small-factor-gpu-test
 	build-tests/aevum-engine-small-factor-gpu-test build-engine/libaevum_engine.so $${AEVUM_TEST_DEVICE:-0} .
 
+# Device test (OpenCL; PoCL is enough): a faulting PRP -use tuner probe must not take the production engine down.
+.PHONY: test-prp-use-isolation-gpu
+test-prp-use-isolation-gpu: engine-lib
+	bash tests/prp_use_isolation_gpu.sh $(ENGINE_LIB) $${AEVUM_TEST_DEVICE:-0}
+
 clean:
 	rm -rf build-debug build-release build-cuda build-engine build-tests build-examples
 
@@ -214,6 +219,7 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	$(MONOLITHIC_SOURCE_TEST)
 	bash tests/opencl12_syntax_test.sh
 	bash tests/pow2_type4_opencl_syntax.sh
+	bash tests/carryfused_no_generic_as_syntax.sh
 	python3 tests/pfa9_lead_bridge_source_test.py
 	bash tests/apple_opencl12_kernel_matrix_syntax.sh
 	python3 tests/apple_gf61_ffthin_staging_test.py
@@ -238,14 +244,17 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	python3 tests/apple_canonical_set_u32_test.py
 	bash tests/source_audit.sh
 	python3 tests/gpu_init_order_test.py
+	python3 tests/readroe_clears_mulroepos_test.py
 	python3 tests/tail_kernels_range_source_test.py
 	python3 tests/engine_autotune_isolation_test.py
 	python3 tests/engine_lead_cache_test.py
 	python3 tests/native_tune_compat_source_test.py
 	python3 tests/cuda_regcf3161_auto_policy_source_test.py
+	python3 tests/nvidia_cc_literal_test.py
 	python3 tests/cuda_engine_lib_makefile_source_test.py
 	python3 tests/cuda_context_lifecycle_source_test.py
 	python3 tests/middlein_gf61_cmul_source_test.py
+	python3 tests/subgroup_barrier_lockstep_test.py
 	python3 tests/asm_string_braces_test.py
 	python3 tests/pfa7_separate_carryb_source_test.py
 	python3 tests/pfa7_nuss8_model_test.py
@@ -270,6 +279,17 @@ $(FFT_VARIANT0_1K_TEST): tests/fft_variant0_1k_test.cpp src/clwrap.cpp src/Trig.
 test-fft-variant0-1k: $(FFT_VARIANT0_1K_TEST)
 	$(FFT_VARIANT0_1K_TEST)
 
+# Device test: FP64 radix-4 variant 2 width FFT (partial_tabMul4) against a reference DFT.
+FFT_RADIX4_VARIANT2_TEST := build-tests/aevum-fft-radix4-variant2-test
+.PHONY: test-fft-radix4-variant2
+test-host: test-fft-radix4-variant2
+test-fft-radix4-variant2: $(FFT_RADIX4_VARIANT2_TEST)
+	$(FFT_RADIX4_VARIANT2_TEST)
+
+$(FFT_RADIX4_VARIANT2_TEST): tests/fft_radix4_variant2_test.cpp src/TrigBufCache.cpp src/clwrap.cpp src/Trig.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc tests/fft_radix4_variant2_test.cpp src/TrigBufCache.cpp src/clwrap.cpp src/Trig.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) $(TEST_GC_LINK) -o $@
+
 $(WMUL_LIMIT_TEST): tests/wmul_limit_test.cpp src/WmulLimit.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/wmul_limit_test.cpp -o $@
@@ -278,6 +298,18 @@ $(FFT8_SKIP1_TEST): tests/fft8_skip1_test.cpp src/clwrap.cpp src/log.cpp src/Fil
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/fft8_skip1_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
 
+# KernelCompiler: a failed clLinkProgram is a compile failure; the link log comes from the linked program (device test)
+KERNEL_LINK_FAILURE_TEST := build-tests/aevum-kernel-link-failure-test
+.PHONY: test-kernel-link-failure
+test-host: test-kernel-link-failure
+test-kernel-link-failure: $(KERNEL_LINK_FAILURE_TEST)
+	$(KERNEL_LINK_FAILURE_TEST)
+$(KERNEL_LINK_FAILURE_TEST): tests/kernel_link_failure_test.cpp src/KernelCompiler.cpp src/KernelCompiler.h src/bundle.cpp src/OpenCLSourceBuilder.cpp src/clwrap.cpp src/sha3.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp src/Args.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc \
+		tests/kernel_link_failure_test.cpp src/KernelCompiler.cpp src/bundle.cpp src/OpenCLSourceBuilder.cpp src/clwrap.cpp src/sha3.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp src/Args.cpp \
+		$(TEST_GC_LINK) $(OPENCL_LIBS) $(DL_LIBS) -o $@
+
 $(EVENT_STATUS_TEST): tests/event_status_test.cpp src/Queue.cpp src/Event.cpp src/TimeInfo.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/timeutil.cpp src/common.cpp src/fs.cpp
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -fno-access-control -Wall -Wextra -Isrc $^ $(OPENCL_LIBS) -o $@
@@ -285,6 +317,18 @@ $(EVENT_STATUS_TEST): tests/event_status_test.cpp src/Queue.cpp src/Event.cpp sr
 $(AUTOTUNE_CACHE_TEST): tests/runtime_autotune_cache_test.cpp src/RuntimeAutotune.cpp src/RuntimeAutotune.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/runtime_autotune_cache_test.cpp src/RuntimeAutotune.cpp -o $@
+
+# tune.txt / config.txt: accept a last line with no final newline (worktodo stays strict)
+UNTERMINATED_LINE_TEST := build-tests/aevum-unterminated-last-line-test
+.PHONY: test-unterminated-last-line
+test-host: test-unterminated-last-line
+test-unterminated-last-line: $(UNTERMINATED_LINE_TEST)
+	$(UNTERMINATED_LINE_TEST)
+$(UNTERMINATED_LINE_TEST): tests/unterminated_last_line_test.cpp src/File.h src/File.cpp src/TuneEntry.cpp src/FFTConfig.cpp src/FFTConfig.h src/Args.cpp src/common.cpp src/fs.cpp src/timeutil.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc \
+		tests/unterminated_last_line_test.cpp src/PrpUseTune.cpp src/RuntimeAutotune.cpp src/FFTConfig.cpp src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp \
+		$(TEST_GC_LINK) -o $@
 
 $(TYPE4_PLAN_TEST): tests/type4_pfa9_plan_test.cpp src/FFTConfig.cpp src/FFTConfig.h src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp
 	@mkdir -p build-tests
@@ -304,10 +348,22 @@ $(FFT_SPEC_ROBUSTNESS_TEST): tests/fft_spec_robustness_test.cpp src/FFTConfig.cp
 		tests/fft_spec_robustness_test.cpp src/PrpUseTune.cpp src/RuntimeAutotune.cpp src/FFTConfig.cpp src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp \
 		$(TEST_GC_LINK) -o $@
 
-$(FFT_EXPLICIT_CAPACITY_TEST): tests/fft_explicit_capacity_test.cpp src/FFTConfig.cpp src/FFTConfig.h src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp
+$(FFT_EXPLICIT_CAPACITY_TEST): tests/fft_explicit_capacity_test.cpp src/FFTConfig.cpp src/FFTConfig.h src/fftbpw.h src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc \
 		tests/fft_explicit_capacity_test.cpp src/PrpUseTune.cpp src/RuntimeAutotune.cpp src/FFTConfig.cpp src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp \
+		$(TEST_GC_LINK) -o $@
+
+# -verbose [<level>]: the developer self-tests run only at level 99
+VERBOSE_LEVEL_TEST := build-tests/aevum-verbose-level-test
+.PHONY: test-verbose-level
+test-host: test-verbose-level
+test-verbose-level: $(VERBOSE_LEVEL_TEST)
+	$(VERBOSE_LEVEL_TEST)
+$(VERBOSE_LEVEL_TEST): tests/verbose_level_test.cpp src/Args.cpp src/Args.h src/StrictInt.h src/FFTConfig.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc \
+		tests/verbose_level_test.cpp src/Args.cpp src/PrpUseTune.cpp src/RuntimeAutotune.cpp src/FFTConfig.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp \
 		$(TEST_GC_LINK) -o $@
 
 $(ARGS_VALUE_FOR_TEST): tests/args_value_for_test.cpp src/Args.cpp src/Args.h src/FFTConfig.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp
@@ -334,6 +390,11 @@ test-gpu: $(BIN)/aevum
 .PHONY: test-gpu-pfa-ll
 test-gpu-pfa-ll: $(BIN)/aevum
 	bash tests/gpu_pfa_ll_test.sh $(BIN)/aevum
+
+# Proof generation failures end to end (slow: one full PRP of 2^400009-1 plus restarts; device test, not in test-host)
+.PHONY: test-gpu-proof-retry
+test-gpu-proof-retry: $(BIN)/aevum
+	bash tests/proof_retry_gpu_test.sh $(BIN)/aevum
 
 
 -include $(wildcard $(ENGINE_DEPDIR)/*.d)
@@ -387,12 +448,23 @@ test-shufl-permutation: $(SHUFL_PERMUTATION_TEST)
 $(SHUFL_PERMUTATION_TEST): tests/shufl_permutation_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/shufl_permutation_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
+# FP32 slowTrig accuracy (trigCoefsFP32 + trig.cl reducedCosSin emulated in float).  -ffp-contract=off: the emulation's
+# multiplies and fmas must round exactly as written.
+TRIG_FP32_TEST := build-tests/aevum-trig-fp32-accuracy-test
+.PHONY: test-trig-fp32-accuracy
+test-host: test-trig-fp32-accuracy
+test-trig-fp32-accuracy: $(TRIG_FP32_TEST)
+	$(TRIG_FP32_TEST)
+$(TRIG_FP32_TEST): tests/trig_fp32_accuracy_test.cpp src/Trig.cpp src/Trig.h src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 -ffp-contract=off $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/trig_fp32_accuracy_test.cpp src/Trig.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp -o $@
 # PR132 cumulative semantic integration
 STATS_SLOT_TEST := build-tests/aevum-stats-slot-test
 .PHONY: test-pr132-small-items test-stats-slot
 test-host: test-pr132-small-items
 test-pr132-small-items: test-stats-slot
 	python3 tests/kernel_config_guards_test.py
+	python3 tests/carryfused_cs_fence_test.py
 	python3 tests/carryfused_weight_shift_modulus_test.py
 	python3 tests/carry_gf61_seed_overflow_test.py
 	python3 tests/prp_middle1_type_gate_test.py
@@ -401,6 +473,15 @@ test-stats-slot: $(STATS_SLOT_TEST)
 $(STATS_SLOT_TEST): tests/stats_slot_test.cpp src/StatsSlot.h src/common.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/stats_slot_test.cpp -o $@
+# STATS: boundCarry(i64) measures 64-bit-only carries against 2^63 (device test; any OpenCL device)
+BOUNDCARRY_STATS_TEST := build-tests/aevum-boundcarry-stats-test
+.PHONY: test-boundcarry-stats
+test-host: test-boundcarry-stats
+test-boundcarry-stats: $(BOUNDCARRY_STATS_TEST)
+	$(BOUNDCARRY_STATS_TEST)
+$(BOUNDCARRY_STATS_TEST): tests/boundcarry_stats_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/boundcarry_stats_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
 # PR133 cumulative semantic integration
 APPLE_FFTP61_SEED_TEST := build-tests/aevum-apple-fftp61-seed-test
 .PHONY: test-pr133-small-items test-apple-fftp61-seed
@@ -412,6 +493,15 @@ test-apple-fftp61-seed: $(APPLE_FFTP61_SEED_TEST)
 $(APPLE_FFTP61_SEED_TEST): tests/apple_fftp61_scalar_seed_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/apple_fftp61_scalar_seed_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
+# math.cl: every i96 implementation provides both make_i96(i64, u32) and make_i96(i64, u64) (device test; any OpenCL device)
+I96_MAKE_TEST := build-tests/aevum-i96-make-test
+.PHONY: test-i96-make
+test-host: test-i96-make
+test-i96-make: $(I96_MAKE_TEST)
+	$(I96_MAKE_TEST)
+$(I96_MAKE_TEST): tests/i96_make_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/i96_make_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
 # PR134 cumulative semantic integration
 APPLE_TAILZERO_TEST := build-tests/aevum-apple-tailzero-halfline-test
 .PHONY: test-pr134-small-items test-apple-tailzero-halfline
@@ -492,6 +582,16 @@ test-cuda-fill: $(CUDA_FILL_TEST)
 $(CUDA_FILL_TEST): tests/cuda_fill_test.cpp src/cuda/CudaFill.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/cuda_fill_test.cpp -o $@
+# The CUDA backend's NVRTC --gpu-architecture choice: own sm_XY, else the newest compute_XY below it (plain ints, no CUDA needed).
+CUDA_NVRTC_ARCH_TEST := build-tests/aevum-cuda-nvrtc-arch-test
+.PHONY: test-cuda-nvrtc-arch
+test-host: test-cuda-nvrtc-arch
+test-cuda-nvrtc-arch: $(CUDA_NVRTC_ARCH_TEST)
+	$(CUDA_NVRTC_ARCH_TEST)
+
+$(CUDA_NVRTC_ARCH_TEST): tests/cuda_nvrtc_arch_test.cpp src/cuda/NvrtcArch.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/cuda_nvrtc_arch_test.cpp -o $@
 # carryFused low-bpw cutoff (long carry below max(10, log2(N)/2 + 0.5) bpw)
 FFT_LONG_CARRY_CUTOFF_TEST := build-tests/aevum-fft-long-carry-cutoff-test
 .PHONY: test-fft-long-carry-cutoff
@@ -522,6 +622,26 @@ test-gpu-lost-error: $(GPU_LOST_ERROR_TEST)
 $(GPU_LOST_ERROR_TEST): tests/gpu_lost_error_test.cpp src/GpuLost.h src/clwrap.h src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/gpu_lost_error_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
+# The CUDA backend's CUmodule lifetime: unloaded by the last program/kernel, never after its context died (no CUDA needed).
+CUDA_MODULE_LIFE_TEST := build-tests/aevum-cuda-module-life-test
+.PHONY: test-cuda-module-life
+test-host: test-cuda-module-life
+test-cuda-module-life: $(CUDA_MODULE_LIFE_TEST)
+	$(CUDA_MODULE_LIFE_TEST)
+
+$(CUDA_MODULE_LIFE_TEST): tests/cuda_module_life_test.cpp src/cuda/CudaModuleLife.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/cuda_module_life_test.cpp -pthread -o $@
+# The CUDA shim's clCreateBuffer reports a failed CL_MEM_COPY_HOST_PTR upload: the real clwrap_cuda.cpp built against
+# a recording stand-in for the CUDA driver (tests/cuda_stub, no CUDA needed).
+CUDA_CREATE_BUFFER_COPY_TEST := build-tests/aevum-cuda-create-buffer-copy-test
+.PHONY: test-cuda-create-buffer-copy
+test-host: test-cuda-create-buffer-copy
+test-cuda-create-buffer-copy: $(CUDA_CREATE_BUFFER_COPY_TEST)
+	$(CUDA_CREATE_BUFFER_COPY_TEST)
+$(CUDA_CREATE_BUFFER_COPY_TEST): tests/cuda_create_buffer_copy_test.cpp $(wildcard tests/cuda_stub/*) src/cuda/clwrap_cuda.cpp $(wildcard src/cuda/*.h) src/common.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Wno-unused-parameter -DCUDA_BACKEND -Isrc -Itests/cuda_stub tests/cuda_create_buffer_copy_test.cpp tests/cuda_stub/stub_driver.cpp src/cuda/clwrap_cuda.cpp -o $@
 # The CUDA backend's mapping of a CUDA driver result to the reported status (plain ints, no CUDA needed).
 CUDA_ERROR_MAP_TEST := build-tests/aevum-cuda-error-map-test
 .PHONY: test-cuda-error-map
@@ -531,6 +651,25 @@ test-cuda-error-map: $(CUDA_ERROR_MAP_TEST)
 $(CUDA_ERROR_MAP_TEST): tests/cuda_error_map_test.cpp src/cuda/CudaErrorMap.h src/GpuLost.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/cuda_error_map_test.cpp -o $@
+# The CUDA shim frees buffers, streams and events in their own context: the real clwrap_cuda.cpp built against a
+# recording stand-in for the CUDA driver (tests/cuda_stub, no CUDA needed).
+CUDA_RELEASE_CONTEXT_TEST := build-tests/aevum-cuda-release-context-test
+.PHONY: test-cuda-release-context
+test-host: test-cuda-release-context
+test-cuda-release-context: $(CUDA_RELEASE_CONTEXT_TEST)
+	$(CUDA_RELEASE_CONTEXT_TEST)
+$(CUDA_RELEASE_CONTEXT_TEST): tests/cuda_release_context_test.cpp $(wildcard tests/cuda_stub/*) src/cuda/clwrap_cuda.cpp $(wildcard src/cuda/*.h) src/common.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Wno-unused-parameter -DCUDA_BACKEND -Isrc -Itests/cuda_stub tests/cuda_release_context_test.cpp tests/cuda_stub/stub_driver.cpp src/cuda/clwrap_cuda.cpp -o $@
+# The CUDA shim runs each program, kernel, queue and event operation in its own context (stand-in driver, no GPU).
+CUDA_OBJECT_CONTEXT_TEST := build-tests/aevum-cuda-object-context-test
+.PHONY: test-cuda-object-context
+test-host: test-cuda-object-context
+test-cuda-object-context: $(CUDA_OBJECT_CONTEXT_TEST)
+	$(CUDA_OBJECT_CONTEXT_TEST)
+$(CUDA_OBJECT_CONTEXT_TEST): tests/cuda_object_context_test.cpp $(wildcard tests/cuda_stub/*) src/cuda/clwrap_cuda.cpp $(wildcard src/cuda/*.h) src/common.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -pthread -Wall -Wextra -Wno-unused-parameter -DCUDA_BACKEND -Isrc -Itests/cuda_stub tests/cuda_object_context_test.cpp tests/cuda_stub/stub_driver.cpp src/cuda/clwrap_cuda.cpp -o $@
 DATA_LAYOUT_TEST := build-tests/aevum-data-layout-test
 
 .PHONY: test-data-layout
@@ -573,8 +712,123 @@ $(STRICT_INT_TEST): tests/strict_int_test.cpp src/StrictInt.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/strict_int_test.cpp -o $@
 
+# isPrimePRP() waits for the Background thread before computing the proof (source check, no device)
+.PHONY: test-proof-background-join
+test-host: test-proof-background-join
+test-proof-background-join:
+	python3 tests/proof_background_join_source_test.py
+
+# isPrimePRP() runs without a ProofSet when the proof power is 0 (source check, no device)
+.PHONY: test-proof-power-zero
+test-host: test-proof-power-zero
+test-proof-power-zero:
+	python3 tests/proof_power_zero_source_test.py
+
+# ProofSet::reducePower() rebuilds the checkpoint table (host only, no device)
+PROOF_REDUCE_POWER_TEST := build-tests/aevum-proof-reduce-power-test
+.PHONY: test-proof-reduce-power
+test-host: test-proof-reduce-power
+test-proof-reduce-power: $(PROOF_REDUCE_POWER_TEST)
+	$(PROOF_REDUCE_POWER_TEST)
+
+$(PROOF_REDUCE_POWER_TEST): tests/proof_reduce_power_test.cpp src/Proof.cpp src/Proof.h src/File.cpp src/log.cpp src/common.cpp src/fs.cpp src/timeutil.cpp src/sha3.cpp src/md5.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc \
+		tests/proof_reduce_power_test.cpp src/Proof.cpp src/File.cpp src/log.cpp src/common.cpp src/fs.cpp src/timeutil.cpp src/sha3.cpp src/md5.cpp \
+		$(TEST_GC_LINK) -o $@
+
+# Gpu::saveProof() retries every failure, then lower powers; a failed proof does not lose the result (source check, no device)
+.PHONY: test-proof-crc-retry
+test-host: test-proof-crc-retry
+test-proof-crc-retry:
+	python3 tests/proof_crc_retry_source_test.py
+
 # carryFused: warp sync() on both sides of the per-wavefront ready flag
 .PHONY: test-carryfused-ready-sync
 test-host: test-carryfused-ready-sync
 test-carryfused-ready-sync:
 	python3 tests/carryfused_ready_sync_source_test.py
+	python3 tests/carryfused_ready_per_line_test.py
+
+# CUDA shim: the kernel-cache blob (PTX + CUBIN) and the PTX_VERSION relabeling (plain C++, no CUDA needed).
+CUDA_BINARY_BLOB_TEST := build-tests/aevum-cuda-binary-blob-test
+.PHONY: test-cuda-binary-blob
+test-host: test-cuda-binary-blob
+test-cuda-binary-blob: $(CUDA_BINARY_BLOB_TEST)
+	$(CUDA_BINARY_BLOB_TEST)
+$(CUDA_BINARY_BLOB_TEST): tests/cuda_binary_blob_test.cpp src/cuda/CudaBinaryBlob.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/cuda_binary_blob_test.cpp -o $@
+
+# File errors (CRC/read/write) are std::exceptions that the top-level handlers catch (host only, no device)
+FILE_ERRORS_TEST := build-tests/aevum-file-errors-test
+.PHONY: test-file-errors-std-exception
+test-host: test-file-errors-std-exception
+test-file-errors-std-exception: $(FILE_ERRORS_TEST)
+	$(FILE_ERRORS_TEST)
+
+$(FILE_ERRORS_TEST): tests/file_errors_std_exception_test.cpp src/File.h src/Background.h src/File.cpp src/log.cpp src/common.cpp src/fs.cpp src/timeutil.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc -pthread tests/file_errors_std_exception_test.cpp src/File.cpp src/log.cpp src/common.cpp src/fs.cpp src/timeutil.cpp -o $@
+
+# -dir naming a missing directory is reported, not an uncaught exception; needs the binary but no GPU.
+.PHONY: test-main-missing-dir
+test-host: test-main-missing-dir
+test-main-missing-dir: aevum
+	python3 tests/main_missing_dir_test.py $(BIN)/aevum
+
+# The CUDA shim answers CL_DEVICE_TOPOLOGY_AMD from the device's PCI bus id (-pci), using the shared host CUDA stub.
+CUDA_TOPOLOGY_PCI_TEST := build-tests/aevum-cuda-topology-pci-test
+.PHONY: test-cuda-topology-pci
+test-host: test-cuda-topology-pci
+test-cuda-topology-pci: $(CUDA_TOPOLOGY_PCI_TEST)
+	$(CUDA_TOPOLOGY_PCI_TEST)
+$(CUDA_TOPOLOGY_PCI_TEST): tests/cuda_topology_pci_test.cpp $(wildcard tests/cuda_stub/*) src/cuda/clwrap_cuda.cpp $(wildcard src/cuda/*.h) src/common.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Wno-unused-parameter -DCUDA_BACKEND -Isrc -Itests/cuda_stub tests/cuda_topology_pci_test.cpp tests/cuda_stub/stub_driver.cpp src/cuda/clwrap_cuda.cpp -o $@
+
+# Signal: SIGTERM and SIGINT request a graceful stop, a second Ctrl-C exits (no GPU).
+# Quote-only include search prevents src/Signal.h from shadowing the C library signal.h on case-insensitive macOS filesystems.
+SIGNAL_TEST := build-tests/aevum-signal-test
+.PHONY: test-signal
+test-host: test-signal
+test-signal: $(SIGNAL_TEST)
+	$(SIGNAL_TEST)
+$(SIGNAL_TEST): tests/signal_test.cpp src/Signal.cpp src/Signal.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -iquote src tests/signal_test.cpp src/Signal.cpp -o $@
+
+# The plan search's time budget counts measurement, not engine builds.
+TUNE_BUDGET_TEST := build-tests/aevum-tune-budget-test
+.PHONY: test-tune-budget
+test-host: test-tune-budget
+test-tune-budget: $(TUNE_BUDGET_TEST)
+	$(TUNE_BUDGET_TEST)
+	python3 tests/autotune_budget_source_test.py
+$(TUNE_BUDGET_TEST): tests/tune_budget_test.cpp src/TuneBudget.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/tune_budget_test.cpp -o $@
+# selftest.cl must not pick its inline asm from a guessed wavefront size.
+.PHONY: test-selftest-wavefront-guard
+test-selftest-wavefront-guard:
+	python3 tests/selftest_wavefront_guard_source_test.py
+
+test-host: test-selftest-wavefront-guard
+
+# Finished PRP results survive proof-generation failure (source check, no device)
+.PHONY: test-proof-result-survival
+test-host: test-proof-result-survival
+test-proof-result-survival:
+	python3 tests/proof_result_survival_source_test.py src/Gpu.cpp
+
+# timeStr(): reentrant time conversion, since every worker thread logs
+.PHONY: test-time-reentrant
+test-host: test-time-reentrant
+test-time-reentrant:
+	python3 tests/time_reentrant_source_test.py
+
+# main() maps how the run ended to the process exit status; needs the binary but no GPU kernels.
+.PHONY: test-main-exit-code
+test-host: test-main-exit-code
+test-main-exit-code: aevum
+	python3 tests/main_exit_code_test.py $(BIN)/aevum

@@ -25,11 +25,13 @@
 #include <algorithm>
 #include <bitset>
 #include <limits>
+#include <optional>
 #include <iomanip>
 #include <sstream>
 #include <type_traits>
 #include <array>
 #include <cinttypes>
+#include <atomic>
 #include <cstring>
 #include <cstdlib>
 #include <cinttypes>
@@ -357,7 +359,7 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 heightRad
   }
   if (cuda_graph_squares) {
 #if defined(CUDA_BACKEND)
-    if (!isNvidiaGpu(id) || getNvidiaComputeCapability(id) < 750)
+    if (!isNvidiaGpu(id) || getNvidiaComputeCapability(id) < 705)   // major * 100 + minor: sm_75 is 705
       throw std::runtime_error("AEVUM_CUDA_GRAPH_SQUARES requires CUDA sm_75+");
 #else
     throw std::runtime_error("AEVUM_CUDA_GRAPH_SQUARES requires the CUDA backend");
@@ -698,6 +700,22 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 heightRad
     }
   }
 
+  // carryFused's !OLD_FENCE carry hand-off coordinates the lanes of a wavefront with sync() and nothing else, from
+  // inside a divergent branch, so a workgroup barrier is not a substitute.  sync() is bar.warp.sync on NVIDIA (unless
+  // NO_ASM removes the PTX) and free on AMD, where a wavefront advances in lock-step.  Anywhere else (Intel, Apple,
+  // PoCL) it is empty, the hand-off races, and the result is silently wrong: an Intel iGPU returns a wrong residue
+  // within 400 iterations.  base.cl defaults OLD_FENCE to 1 off AMD; make that hold when 0 is asked for explicitly.
+  {
+    auto noAsm = config.find("NO_ASM");
+    const bool warpSync = isNvidiaGpu(id) && (noAsm == config.end() || atoi(noAsm->second.c_str()) == 0);
+    if (!isAmdGpu(id) && !warpSync) {
+      if (auto it = config.find("OLD_FENCE"); it != config.end() && atoi(it->second.c_str()) == 0) {
+        it->second = "1";
+        if (doLog) { log("OLD_FENCE=0 needs an AMD GPU or NVIDIA PTX (a lock-step wavefront or a warp barrier); using OLD_FENCE=1.\n"); }
+      }
+    }
+  }
+
   // Register keys are host-side CUDA controls, never source specialization
   // macros. Strip them unconditionally so even AEVUM_REGISTER_PROFILES=0
   // (the host-side kill switch) cannot perturb unrelated source/cache identity.
@@ -810,8 +828,18 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 heightRad
   defines += toDefine("MAXBPW", (u32)(fft.maxBpw() * 100.0f));
 
   if (fft.FFT_FP64 || fft.FFT_FP32) {
-    defines += toDefine("WEIGHT_STEP", weightM1(N, E, fft.shape.height * fft.shape.middle, 0, 0, 1));
-    defines += toDefine("IWEIGHT_STEP", invWeightM1(N, E, fft.shape.height * fft.shape.middle, 0, 0, 1));
+    double const weightStep = weightM1(N, E, fft.shape.height * fft.shape.middle, 0, 0, 1);
+    double const iweightStep = invWeightM1(N, E, fft.shape.height * fft.shape.middle, 0, 0, 1);
+    if (fft.FFT_FP64) {
+      defines += toDefine("WEIGHT_STEP", weightStep);
+      defines += toDefine("IWEIGHT_STEP", iweightStep);
+    } else {
+      // FP32 kernels need float literals.  This is the same rounding the
+      // OpenCL compiler previously performed from the double constants,
+      // without requiring double-literal support on FP32-only devices.
+      defines += toDefine("WEIGHT_STEP", float(weightStep));
+      defines += toDefine("IWEIGHT_STEP", float(iweightStep));
+    }
     if (fft.FFT_FP64) defines += toDefine("TAILT", root1Fancy(fft.shape.height * 2, 1));
     else defines += toDefine("TAILT", root1FancyFP32(fft.shape.height * 2, 1));
 
@@ -828,7 +856,7 @@ snprintf(buf, sizeof(buf), "%#.9gf", (double)(float)v);
 return string(buf);
 };
 string sinCoefs = "{", cosCoefs = "{";
-for (u32 i = 0; i < 8; ++i) {
+for (u32 i = 0; i < coefs.sinCoefs.size(); ++i) {
 sinCoefs += lit(coefs.sinCoefs[i]) + ',';
 cosCoefs += lit(coefs.cosCoefs[i]) + ',';
 }
@@ -1907,7 +1935,8 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   bufStatsCarry.zero();
   bufTrue.write({1});
 
-  if (args.verbose) {
+  // Developer self-tests only: on AMD they build and run inline-asm timing kernels, which caused problems on some GPUs.
+  if (args.verbose >= Args::VERBOSE_SELFTEST) {
     selftestTrig();
   }
 
@@ -3160,6 +3189,7 @@ pair<RoeInfo, RoeInfo> Gpu::readROE() {
     mulRoePos.clear();
     return {roeStat(squareRoe), roeStat(mulRoe)};
   } else {
+    mulRoePos.clear();   // positions recorded while ROE sampling was off must not tag the next window's samples
     return {};
   }
 }
@@ -3795,29 +3825,100 @@ void Gpu::doDiv9(u64 E, Words& words) {
   doDiv3(E, words);
 }
 
+namespace {
+
+// Test hook: AEVUM_TEST_PROOF_FAILURES=<n>[:file] makes the first <n> proof attempts of the process fail before computeProof,
+// as a GPU error (the default) or, with ":file", as a file error (ReadError).  Used by tests/proof_retry_gpu_test.sh.
+void injectProofFailure() {
+  static std::atomic<int> remaining{-1};
+  static std::atomic<bool> asFileError{false};
+  if (remaining.load() < 0) {
+    int n = 0;
+    bool file = false;
+    if (const char* v = std::getenv("AEVUM_TEST_PROOF_FAILURES")) {
+      n = atoi(v);
+      file = strstr(v, ":file") != nullptr;
+    }
+    asFileError = file;
+    int expected = -1;
+    remaining.compare_exchange_strong(expected, n);
+  }
+  if (remaining.load() > 0 && remaining.fetch_sub(1) > 0) {
+    if (asFileError) { throw ReadError{"AEVUM_TEST_PROOF_FAILURES"}; }
+    throw "injected proof failure (AEVUM_TEST_PROOF_FAILURES)";
+  }
+}
+
+}  // namespace
+
+// Generating and verifying a proof can fail for transient reasons: a hardware error during the verification squarings (which
+// have no Gerbicz check), a bad GPU read, a file error.  So try hard before giving up: the initial power twice, then each lower
+// power down to 5, all verified, and finally power 4 (or the initial power if lower) without verification.  Any failure moves
+// on to the next attempt.
+// If every attempt fails, a file error (missing or corrupt proof residues, which a restart cannot fix) throws to the caller,
+// which reports the result without a proof.  Any other failure is most likely the GPU (e.g. a CUDA "sticky" error leaves the
+// context unusable for the rest of the process).  Then stop every worker without reporting the result.  The worktodo entry,
+// savefiles and proof residues are all kept, so a restart redoes the iterations since the last savefile and makes the proof.
+// From upstream gpuowl cdb1ef5.
 fs::path Gpu::saveProof(const Args& args, ProofSet& proofSet) {
-  bool problem_proof = false;
-  for ( ; ; ) {
-    for (int retry = 0; retry == 0 || (retry == 1 && !problem_proof); ++retry) {
+  u32 const initialPower = proofSet.power;
+  vector<pair<u32, bool>> attempts{{initialPower, true}, {initialPower, true}};      // {power, verify}
+  for (u32 p = initialPower; p-- > 5; ) { attempts.push_back({p, true}); }
+  attempts.push_back({min(initialPower, 4u), false});
+
+  bool fileError = false;      // whether the most recent attempt failed on a file error
+  for (auto [power, verify] : attempts) {
+    while (proofSet.power > power) { proofSet.reducePower(); }
+    string why;
+    fileError = false;
+    try {
+      injectProofFailure();
       auto [proof, hashes] = proofSet.computeProof(this);
       fs::path tmpFile = proof.file(args.proofToVerifyDir);
       proof.save(tmpFile);
-            
+
       fs::path proofFile = proof.file(args.proofResultDir);
 
-      bool ok = Proof::load(tmpFile).verify(this, hashes);
-      log("Proof '%s' verification %s\n", tmpFile.string().c_str(), ok ? "OK" : "FAILED");
+      bool ok = true;
+      if (verify) {
+        ok = Proof::load(tmpFile).verify(this, hashes);
+        log("Proof '%s' verification %s\n", tmpFile.string().c_str(), ok ? "OK" : "FAILED");
+      } else {
+        log("Proof '%s' verification skipped (last resort)\n", tmpFile.string().c_str());
+      }
       if (ok) {
         fancyRename(tmpFile, proofFile);
         log("Proof '%s' generated\n", proofFile.string().c_str());
         return proofFile;
       }
+      why = "verification failed";
+    } catch (const CRCError& e) {
+      // A corrupt proof residue: the same power reads the same file again; a lower power may not need it.
+      why = "proof residue '" + e.name + "' failed its checksum";
+      fileError = true;
+    } catch (const ReadError& e) {
+      why = "cannot read '" + e.name + "'";
+      fileError = true;
+    } catch (const WriteError& e) {
+      why = "cannot write '" + e.name + "'";
+      fileError = true;
+    } catch (const fs::filesystem_error& e) {
+      why = e.what();
+      fileError = true;
+    } catch (const char* mes) {
+      why = mes;
+    } catch (const string& mes) {
+      why = mes;
+    } catch (const std::exception& e) {
+      why = e.what();
     }
-    problem_proof = true;
-    proofSet.reducePower();
-    if (proofSet.power < 4) break;
+    if (Signal::stopRequested()) { throw "stop requested"; }
+    log("Proof of power %u failed (%s)\n", proofSet.power, why.c_str());
   }
-  throw "bad proof generation";
+  if (fileError) { throw "bad proof generation"; }
+  log("Proof generation failed, most likely a GPU error.  Stopping without reporting the result; restart to make the proof.\n");
+  Signal::requestStop();
+  throw "GPU error during proof generation";
 }
 
 PRPState Gpu::loadPRP(Saver<PRPState>& saver) {
@@ -4102,8 +4203,11 @@ PRPResult Gpu::isPrimePRP(const Task& task) {
   assert(checkStep % logStep == 0);
 
   u32 power = getProofPower(k);
-  
-  ProofSet proofSet{E, power};
+
+  // power == 0 means "proof generation disabled" (no complete set of residues can be built from here on).  ProofSet
+  // does not accept 0, so only construct one when there is a proof to make.
+  std::optional<ProofSet> proofSet;
+  if (power) { proofSet.emplace(E, power); }
 
   bool isPrime = false;
 
@@ -4122,7 +4226,7 @@ PRPResult Gpu::isPrimePRP(const Task& task) {
 
   bool skipNextCheckUpdate = false;
 
-  u64 persistK = proofSet.next(k);
+  u64 persistK = proofSet ? proofSet->next(k) : u64(-1);
   enum LEAD_TYPE leadIn = LEAD_NONE;
 
   assert(k % blockSize == 0);
@@ -4167,7 +4271,7 @@ PRPResult Gpu::isPrimePRP(const Task& task) {
         goto reload;
       }
       (*background)([=, E=this->E] { ProofSet::save(E, power, k, compactBits(rawData, E)); });
-      persistK = proofSet.next(k);
+      persistK = proofSet->next(k);
     }
 
     if (k == kEnd) {
@@ -4226,9 +4330,23 @@ PRPResult Gpu::isPrimePRP(const Task& task) {
         doBigLog(k, res, ok, secsPerIt, kEndEnd, nErrors);
 
         if (k >= kEndEnd) {
-          fs::path proofFile = saveProof(args, proofSet);
+          // The test is complete; nothing after this point may lose the result.  The proof residue at k == E is written by the
+          // background thread, so make sure it is on disk before computeProof() reads it back.  If the proof cannot be generated,
+          // report the result without one (writeResultPRP omits the proof then) rather than throw it away.  A stop request (a
+          // signal, or saveProof's own stop after a GPU error) still propagates: the worktodo entry, savefiles and proof residues
+          // are kept.
+          fs::path proofFile;
+          if (proofSet) {
+            background->waitEmpty();
+            try {
+              proofFile = saveProof(args, *proofSet);
+            } catch (...) {
+              if (Signal::stopRequested()) { throw; }
+              log("Proof generation failed; reporting the result without a proof\n");
+            }
+          }
           return {isPrime, finalRes64, nErrors, proofFile.string(), toHex(res2048)};
-        }        
+        }
       } else {
         ++nErrors;
         doBigLog(k, res, ok, secsPerIt, kEndEnd, nErrors);

@@ -475,6 +475,8 @@ public:
   void regProfileReport(bool emit);
   double regPrpRoe(bool begin);
   bool regSupportsLeadCache() const;
+  // Time this engine has spent loading (compiling) its kernels; they load lazily, on first use.
+  std::chrono::steady_clock::duration kernelLoadTime() const { return compiler.loadTime(); }
   bool regSupportsFusedLL() const;
   bool regSupportsPreparedMulLead() const;
   void regSquareStep(Buffer<Word>& io, bool lead_in, bool lead_out, bool ll = false);

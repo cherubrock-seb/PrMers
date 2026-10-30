@@ -4,16 +4,38 @@
 
 #include <ctime>
 
+// localtime() and gmtime() share one static result buffer, and every worker thread logs,
+// so convert into a local struct tm instead.
+static std::tm localTm(time_t t) {
+  std::tm tm{};
+#ifdef _WIN32
+  localtime_s(&tm, &t);
+#else
+  localtime_r(&t, &tm);
+#endif
+  return tm;
+}
+
+static std::tm utcTm(time_t t) {
+  std::tm tm{};
+#ifdef _WIN32
+  gmtime_s(&tm, &t);
+#else
+  gmtime_r(&t, &tm);
+#endif
+  return tm;
+}
+
 std::string timeStr(const char *format) {
-  time_t t = time(NULL);
+  std::tm tm = localTm(time(NULL));
   char buf[64];
-  strftime(buf, sizeof(buf), format, localtime(&t));
+  strftime(buf, sizeof(buf), format, &tm);
   return buf;
 }
 
 std::string timeStr() {
-  time_t t = time(NULL);
+  std::tm tm = utcTm(time(NULL));
   char buf[64];
-  strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", gmtime(&t));   // equivalent to: "%F %T"
+  strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm);   // equivalent to: "%F %T"
   return buf;
 }
