@@ -27,10 +27,10 @@ on:
         required: false
         type: boolean
         default: false
-# The reusable macOS workflow declares contents: write for its legacy tag job.
-# Match its caller permission, but publication below remains dispatch-only.
+# Build and test jobs need only repository read access. The publish job below
+# elevates contents permission only for an explicit approved workflow dispatch.
 permissions:
-  contents: write
+  contents: read
 env:
   TAG: v4.20.97-alpha-v100.48-correctness-hardening
 jobs:
