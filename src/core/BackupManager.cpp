@@ -587,7 +587,7 @@ void BackupManager::saveStatePM1S2(cl_mem hqBuf,
 }
 
 
-uint64_t BackupManager::loadState(std::vector<uint64_t>& x) {
+uint64_t BackupManager::loadState(std::vector<uint64_t>& x, uint64_t totalIters) {
     uint64_t resume = 0;
     setLoaded_ = false;
     glHasBufd_ = glHasCorrect_ = glHasLastBufd_ = false;
@@ -607,6 +607,13 @@ uint64_t BackupManager::loadState(std::vector<uint64_t>& x) {
         const int r = loadSet(basePrefix_, "loop", parts, resume);
         if (r < 0) {
             std::cerr << "Warning: starting from iteration 0" << std::endl;
+            stateDiscarded_ = true;
+            fresh();
+            return 0;
+        }
+        if (r > 0 && !resumeWithinTotal(resume, totalIters)) {
+            std::cerr << "Warning: the saved iteration " << resume << " is beyond the " << totalIters
+                      << " iterations of this test — starting from iteration 0" << std::endl;
             stateDiscarded_ = true;
             fresh();
             return 0;
@@ -646,7 +653,16 @@ uint64_t BackupManager::loadState(std::vector<uint64_t>& x) {
 
     // 3) No manifest: the files of an earlier version, read as that version did.
     std::ifstream loopIn(loopFilename_);
-    if (loopIn >> resume && resume > 0) {
+    if (loopIn >> resume && resume > 0 && !resumeWithinTotal(resume, totalIters)) {
+        // A flipped digit in the unprotected .loop file: resuming would skip the main loop and
+        // report the loaded state as the final residue.
+        std::cerr << "Warning: the saved iteration " << resume << " in " << absLoop << " is beyond the "
+                  << totalIters << " iterations of this test — starting from iteration 0" << std::endl;
+        resume = 0;
+        stateDiscarded_ = true;
+        fresh();
+    }
+    else if (loopIn && resume > 0) {
         std::cout << "Resuming from iteration " << resume
                   << " based on " << absLoop << std::endl;
 

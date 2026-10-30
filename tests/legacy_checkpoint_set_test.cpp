@@ -336,6 +336,59 @@ void test_clear(const fs::path & root)
 
 }	// namespace
 
+// A saved iteration beyond the number of iterations of the test is a damaged file: the state is discarded
+// (Gerbicz-Li part included). A position equal to the total is a finished test with its final checkpoint.
+void test_loop_bound(const fs::path & root)
+{
+	{
+		const fs::path d = two_saves(root, "bound");   // current set: iteration 100
+		auto load = [&](const uint64_t total, std::vector<uint64_t> & x) { auto b = make(d); return b.loadState(x, total); };
+		std::vector<uint64_t> x(n, 9);
+		expect(load(100, x) == 100 && x == vec(2), "set at the total is resumed");
+		expect(load(5000, x) == 100 && x == vec(2), "set below the total is resumed");
+		x.assign(n, 9);
+		expect(load(99, x) == 0 && x[0] == 3 && x[1] == 0 && x[n - 1] == 0, "set beyond the total starts over");
+		auto b = make(d);
+		x.assign(n, 9);
+		expect(b.loadState(x, 99) == 0, "set beyond the total starts over (again)");
+		std::vector<uint64_t> a(n, 9);
+		b.loadGerbiczLiBufDState(a);
+		expect(b.loadGerbiczIterSave() == 0 && a[0] == 1 && a[1] == 0, "Gerbicz-Li part discarded with it");
+	}
+	{
+		// files of an earlier version have no manifest and no checksum
+		const fs::path d = fresh_dir(root, "boundold");
+		const auto g = gl(1);
+		auto words = [&](const std::string & s, const std::vector<uint64_t> & v) {
+			write(d / (base + "." + s), std::string(reinterpret_cast<const char *>(v.data()), v.size() * 8));
+		};
+		words("mers", vec(1)); words("bufd", g.bufd); words("lbufd", g.lastBufd); words("gli", g.correct);
+		write(d / (base + ".isav"), "10"); write(d / (base + ".jsav"), "20");
+		auto run = [&](const std::string & loop, const uint64_t total, std::vector<uint64_t> & x, const bool check_gl = true) {
+			write(d / (base + ".loop"), loop);
+			auto b = make(d);
+			x.assign(n, 9);
+			const uint64_t r = b.loadState(x, total);
+			std::vector<uint64_t> a(n, 9);
+			b.loadGerbiczLiBufDState(a);
+			if (r == 0 && check_gl) expect(b.loadGerbiczIterSave() == 0 && a[0] == 1, "discarded state keeps no Gerbicz-Li part: " + loop);
+			return r;
+		};
+		std::vector<uint64_t> x;
+		expect(run("77", 77, x) == 77 && x == vec(1), "legacy loop at the total is resumed");
+		expect(run("77\n", 1000, x) == 77 && x == vec(1), "legacy loop below the total is resumed");
+		expect(run("78", 77, x) == 0 && x[0] == 3 && x[1] == 0, "legacy loop one past the total starts over");
+		expect(run("1778", 77, x) == 0 && x[0] == 3 && x[1] == 0, "legacy loop with a flipped digit starts over");
+		expect(run("18446744073709551615", 77, x) == 0 && x[0] == 3, "legacy loop of 2^64-1 starts over");
+		expect(run("-1", 77, x) == 0 && x[0] == 3, "negative legacy loop starts over");
+		expect(run("99999999999999999999999999", 77, x, false) == 0 && x[0] == 3, "overflowing legacy loop starts over");
+		expect(run("0", 77, x, false) == 0 && x[0] == 3, "zero legacy loop starts over");
+		expect(run("77", UINT64_MAX, x) == 77, "no bound given: unchanged");
+	}
+	expect(core::BackupManager::resumeWithinTotal(0, 0) && core::BackupManager::resumeWithinTotal(5, 5) &&
+	       !core::BackupManager::resumeWithinTotal(6, 5), "resumeWithinTotal");
+}
+
 int main()
 {
 	const fs::path root = fs::temp_directory_path() / ("prmers-legacy-set-" + std::to_string(::getpid()));
@@ -345,6 +398,7 @@ int main()
 	test_interrupted_saves(root);
 	test_inconsistent(root);
 	test_old_format(root);
+	test_loop_bound(root);
 	test_stage2(root);
 	test_clear(root);
 	fs::remove_all(root);
