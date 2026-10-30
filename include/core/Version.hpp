@@ -4,7 +4,7 @@
 #include <string>
 
 namespace core {
-    const std::string PRMERS_VERSION = "4.20.97-alpha-v100.47-cuda-autobuild";
+    const std::string PRMERS_VERSION = "4.20.97-alpha-v100.48-correctness-hardening";
 } // namespace core
 
 #endif // VERSION_HPP

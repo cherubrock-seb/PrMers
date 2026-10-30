@@ -32,7 +32,7 @@ on:
 permissions:
   contents: write
 env:
-  TAG: v4.20.97-alpha-v100.47-cuda-autobuild
+  TAG: v4.20.97-alpha-v100.48-correctness-hardening
 jobs:
   linux:
     runs-on: ubuntu-24.04
@@ -176,7 +176,7 @@ jobs:
           sha256sum *.tar.gz *.zip > SHA256SUMS.txt
           test "$(wc -l < SHA256SUMS.txt)" -eq 5
           cat > NOTES.md <<'EOF'
-          PrMers v100.47: CUDA Toolkit auto-detection during standard source builds; retains unified Aevum CUDA/OpenCL selection for PRP, Lucas-Lehmer, P-1 (including low-memory), ECM and generic workloads wherever Aevum is supported.
+          PrMers v100.48: correctness and reliability hardening across checkpoint/resume handling, P-1 and ECM failure paths, LL-safe plan capacity, worktodo/input validation, and release identity checks; retains the v100.47 unified CUDA/OpenCL auto-build and selector behavior.
 
           Aevum's existing per-workload FFT selector remains authoritative, including tune.txt and explicit FFT overrides. On NVIDIA, a bounded workload-aware probe verifies canonical residue agreement, selecting CUDA only if at least 3% faster. Missing CUDA/NVRTC, unsupported GPU mapping, errors and mismatches safely retain OpenCL.
 
@@ -190,5 +190,5 @@ jobs:
             echo "Refusing to overwrite already-published release $TAG" >&2
             exit 1
           fi
-          gh release create "$TAG" ./*.tar.gz ./*.zip ./SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "PrMers v100.47 CUDA auto-build and multi-mode GPU selector" --notes-file NOTES.md
+          gh release create "$TAG" ./*.tar.gz ./*.zip ./SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "PrMers v100.48 correctness and reliability hardening" --notes-file NOTES.md
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url,isPrerelease,assets
