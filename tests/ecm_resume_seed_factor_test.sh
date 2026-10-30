@@ -63,6 +63,8 @@ start_bg r1.log "${TE[@]}" -seed 111
 wait_for r1.log 'Stage1 [0-9]*/[0-9]' 90 || fail "TE: run 1 never reported Stage 1 progress"
 stop_bg
 ls ecm_te_m_239_c0.ckpt* >/dev/null 2>&1 || fail "TE: interrupted run left no Stage 1 checkpoint"
+[ -f ecm_te_m_239_c0.ckpt ] || fail "TE: interrupted run left no current Stage 1 checkpoint"
+cp ecm_te_m_239_c0.ckpt "$WORK/te_seed111_stale.ckpt" || fail "TE: could not preserve the seed-111 checkpoint"
 
 # same seed resumes
 start_bg r2.log "${TE[@]}" -seed 111
@@ -71,7 +73,11 @@ stop_bg
 grep -aq 'curve_seed=111' r2.log || fail "TE: same -seed did not keep curve_seed=111"
 grep -aq 'resumed from Stage1 checkpoint' r2.log || fail "TE: same -seed no longer resumes its checkpoint"
 
-# another seed does not pick the leftover checkpoint's seed
+# another seed does not pick the leftover checkpoint's seed.
+# The same-seed resume can finish before SIGINT on fast GPUs, so restore the
+# preserved seed-111 checkpoint explicitly instead of depending on timing.
+rm -f ecm_te_m_239_c0.ckpt ecm_te_m_239_c0.ckpt.old ecm_te_m_239_c0.ckpt.new
+cp "$WORK/te_seed111_stale.ckpt" ecm_te_m_239_c0.ckpt || fail "TE: could not restore the stale seed-111 checkpoint"
 start_bg r3.log "${TE[@]}" -seed 222
 wait_for r3.log 'Stage1 [0-9]*/[0-9]' 90 || fail "TE: -seed 222 run never reported Stage 1 progress"
 stop_bg
