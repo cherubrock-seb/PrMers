@@ -672,6 +672,14 @@ test-error-check-retry:
 test-llsafe-error-recovery: all
 	bash tests/run_llsafe_error_recovery_regression.sh $${AEVUM_TEST_DEVICE:-0}
 
+.PHONY: test-llsafe-resume-iter0-check
+test-llsafe-resume-iter0-check: all
+	bash tests/run_llsafe_resume_after_iter0_check.sh $${AEVUM_TEST_DEVICE:-0}
+
+.PHONY: test-prp-legacy-resume-iter0-check
+test-prp-legacy-resume-iter0-check: all
+	bash tests/run_prp_legacy_resume_after_iter0_check.sh $${AEVUM_TEST_DEVICE:-0}
+
 .PHONY: test-prp-worktodo-retire
 test-prp-worktodo-retire: all
 	bash tests/run_prp_worktodo_retire_failure.sh $${AEVUM_TEST_DEVICE:-0}
