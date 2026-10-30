@@ -373,9 +373,9 @@ int App::runPrpOrLl() {
 
     uint64_t itersave =  backupManager.loadGerbiczIterSave();
         
-    // itersave is the index of the last verified iteration and is 0 both before any check and
-    // after a check at iteration 0; verified_done is the number of iterations the saved state has
-    // done, so a rollback does not repeat iteration 0 when the state is already past it.
+    // itersave is the index of the last verified iteration and is 0 before any check. A check at
+    // iteration 0 is not recorded (see the check below), so 0 always means the initial state.
+    // verified_done is the number of iterations the verified state has done.
     uint64_t verified_done = itersave != 0 ? itersave + 1 : 0;
     core::ErrorCheckRetry errcheck_retry;
     uint64_t checkpass = 0;
@@ -742,12 +742,18 @@ int App::runPrpOrLl() {
                                 guiServer_->appendLog(oss.str());
                     }
                     nttEngine->copy(buffers->save, buffers->input, limbBytes);
-                    nttEngine->copy(buffers->save, buffers->last_correct_state, limbBytes);
-                    nttEngine->copy(buffers->bufd, buffers->last_correct_bufd, limbBytes);
-                    itersave = iter;
-                    verified_done = iter + 1;
-                    jsave = j;
-                    errcheck_retry.passed();
+                    // The checkpoint stores the last verified iteration as itersave, and 0 means "none", so
+                    // a check at iteration 0 cannot be told from a fresh start once the state is saved and
+                    // resumed. Keep the initial state as the verified one: a rollback then repeats
+                    // iteration 0 from the true start, and the next check still covers it.
+                    if (iter != 0) {
+                        nttEngine->copy(buffers->save, buffers->last_correct_state, limbBytes);
+                        nttEngine->copy(buffers->bufd, buffers->last_correct_bufd, limbBytes);
+                        itersave = iter;
+                        verified_done = iter + 1;
+                        jsave = j;
+                        errcheck_retry.passed();
+                    }
                     checkLegacyCl(clFinish(context.getQueue()), "clFinish (Gerbicz-Li)");
                 } else {
                     std::cout << "[Gerbicz Li] Mismatch \n"

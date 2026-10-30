@@ -704,9 +704,9 @@ int App::runLlSafeMarin()
     uint64_t startIter  = iter_done;
     uint64_t itersave = (r==0) ? itersave_meta : (resumeIter ? resumeIter - 1 : 0);
     uint64_t jsave = (r==0) ? jsave_meta : (totalIters - resumeIter - 1);
-    // itersave is the index of the last verified iteration and is 0 both before any check and
-    // after a check at iteration 0; verified_done is the number of iterations the saved state has
-    // done, so a rollback does not repeat iteration 0 when the state is already past it.
+    // itersave is the index of the last verified iteration and is 0 before any check. A check at
+    // iteration 0 is not recorded (see the check below), so 0 always means the initial state.
+    // verified_done is the number of iterations the verified state has done.
     uint64_t verified_done = (r==0 && itersave_meta != 0) ? itersave_meta + 1 : 0;
     core::ErrorCheckRetry errcheck_retry;
     std::string res64_x; res64_pair(res64_x);
@@ -808,15 +808,21 @@ int App::runLlSafeMarin()
             uint64_t blk_end = (iter + 1);
             std::cout << "[Gerbicz-Li] Check OK at iter=" << (iter + 1) << " block=[" << blk_start << ".." << blk_end << "]" << std::endl;
             if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz-Li] Check OK at iter=" << (iter + 1) << " block=[" << blk_start << ".." << blk_end << "]"; guiServer_->appendLog(oss.str()); }
-            eng->copy(static_cast<engine::Reg>(RSAVE_R_A), static_cast<engine::Reg>(RRES_A));
-            eng->copy(static_cast<engine::Reg>(RSAVE_R_B), static_cast<engine::Reg>(RRES_B));
-            eng->copy(static_cast<engine::Reg>(RSAVE_F_A), static_cast<engine::Reg>(RACC_A));
-            eng->copy(static_cast<engine::Reg>(RSAVE_F_B), static_cast<engine::Reg>(RACC_B));
-            itersave = iter;
-            verified_done = iter + 1;
-            jsave = j;
+            // The checkpoint stores the last verified iteration as itersave, and 0 means "none", so a
+            // check at iteration 0 cannot be told from a fresh start once the state is saved and
+            // resumed. Keep the initial state as the verified one: a rollback then repeats iteration 0
+            // from the true start, and the next check still covers it, as the accumulator carries on.
+            if (iter != 0) {
+                eng->copy(static_cast<engine::Reg>(RSAVE_R_A), static_cast<engine::Reg>(RRES_A));
+                eng->copy(static_cast<engine::Reg>(RSAVE_R_B), static_cast<engine::Reg>(RRES_B));
+                eng->copy(static_cast<engine::Reg>(RSAVE_F_A), static_cast<engine::Reg>(RACC_A));
+                eng->copy(static_cast<engine::Reg>(RSAVE_F_B), static_cast<engine::Reg>(RACC_B));
+                itersave = iter;
+                verified_done = iter + 1;
+                jsave = j;
+                errcheck_retry.passed();
+            }
             checkpass = 0;
-            errcheck_retry.passed();
         }
     }
 
