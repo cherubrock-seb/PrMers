@@ -1,5 +1,6 @@
 #include "aevum/EngineAevum.hpp"
 #include "aevum/DeviceMap.hpp"
+#include "aevum/Radix1kPolicy.hpp"
 #include "marin/engine.h"
 #include "marin/ocl.h"
 #include "util/GpuLost.hpp"
@@ -166,6 +167,20 @@ AevumDevice resolve_aevum_device(std::size_t device) {
         break;
     }
     return {device, std::string()};
+}
+
+bool opencl_device_is_nvidia(std::size_t device) {
+    try {
+        const ocl::platform platform;
+        if (device >= platform.get_device_count()) return false;
+        cl_uint vendor_id = 0;
+        if (clGetDeviceInfo(platform.get_device(device), CL_DEVICE_VENDOR_ID, sizeof(vendor_id), &vendor_id,
+                            nullptr) != CL_SUCCESS)
+            return false;
+        return vendor_id == 0x10DE;
+    } catch (const std::exception&) {
+        return false;
+    }
 }
 
 struct Api {
@@ -621,13 +636,11 @@ public:
             std::array<char, 96> actual{};
             if (api_.plan_spec(handle_, actual.data(), actual.size())) plan_spec_ = actual.data();
         }
-        const char* radix1k_env = std::getenv("AEVUM_RADIX1K");
-        const bool radix1k_8 = radix1k_env && std::string(radix1k_env) == "8";
         std::cout << "[Backend Aevum] engine::Reg adapter active, FFT3161/FFT3261/FFT323161"
                   << " | transform=" << transform_size_
                   << " | requested-plan=" << (fft_spec.empty() ? "plugin-auto" : fft_spec)
                   << " | plan=" << (plan_spec_.empty() ? "unknown" : plan_spec_)
-                  << " | radix1k=" << (radix1k_8 ? "8(explicit-override)" : "4(safe-default)")
+                  << " | " << aevum_radix1k_policy_detail(device, api_.is_cuda)
                   << " | regs=" << register_count_
                   << " | backend=" << (api_.is_cuda ? "CUDA" : "OpenCL")
                   << " | plugin=" << api_.path
@@ -1081,4 +1094,14 @@ engine* create_aevum_engine(uint32_t exponent,
                             const std::string& fft_spec,
                             std::uint32_t workload) {
     return new engine_aevum(exponent, register_count, device, verbose, fft_spec, workload);
+}
+
+std::string aevum_radix1k_policy_detail(std::size_t device, bool cuda_plugin) {
+#if defined(__APPLE__)
+    constexpr bool apple_build = true;
+#else
+    constexpr bool apple_build = false;
+#endif
+    return aevum_policy::radix1k_detail(aevum_policy::radix1k_policy(
+        std::getenv("AEVUM_RADIX1K"), apple_build, cuda_plugin || opencl_device_is_nvidia(device)));
 }

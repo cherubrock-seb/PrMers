@@ -38,8 +38,17 @@ assert 'NVIDIA device default' in engine
 assert 'explicit AEVUM_RADIX1K=4 override' in engine
 assert 'config.try_emplace("WMUL", "1")' in gpu
 assert 'fft.shape.width == 1024 && fft.shape.nW() == 4' in gpu
-assert 'radix1k=8 explicit-override' in backend
-assert 'radix1k=4 safe-default' in backend
+# The backend log reports the radix the plugin will use (tests/aevum_radix1k_policy_test.cpp checks the
+# rule), not just the AEVUM_RADIX1K variable.
+radix_policy = (root / "include/aevum/Radix1kPolicy.hpp").read_text()
+assert 'getenv("AEVUM_RADIX1K")' not in backend
+assert 'aevum_radix1k_policy_detail(device)' in backend
+assert 'aevum_radix1k_policy_detail(device, api_.is_cuda)' in adapter
+assert 'radix1k=8(explicit-override)' not in adapter
+assert 'CL_DEVICE_VENDOR_ID' in adapter and '0x10DE' in adapter
+assert 'FFTConfig.h' in radix_policy and 'aevumSetDefaultRadix8For1K' in radix_policy
+for label in ('apple-forced', 'explicit-override', 'nvidia-default', 'safe-default'):
+    assert label in radix_policy
 
 # Issue #36 regression barrier.
 assert '"throughput:prp"' not in app
