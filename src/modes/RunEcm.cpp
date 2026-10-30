@@ -6,6 +6,7 @@
 #include "core/Printer.hpp"
 #include "core/ProofSet.hpp"
 #include "core/ProofSetMarin.hpp"
+#include "core/CheckpointLength.hpp"
 #include "math/Carry.hpp"
 #include "math/EcmTorsionCurves.hpp"
 #include "math/EcmKnownFactors.hpp"
@@ -731,12 +732,10 @@ int App::runECMMarin()
             if (len != 0 && !f.write(hx.data(), len)) return false;
             return true;
         };
-        auto read_mpz_blob = [&](File& f, mpz_class& z)->bool {
-            uint32_t len = 0;
-            if (!f.read(reinterpret_cast<char*>(&len), sizeof(len))) return false;
-            std::string hx(len, '\0');
-            if (len != 0 && !f.read(&hx[0], len)) return false;
-            if (len == 0) { z = 0; return true; }
+        auto read_mpz_blob = [&](File& f, mpz_class& z, uint64_t fileSize)->bool {
+            std::string hx;
+            if (!core::ckptlen::readLenPrefixed(f, fileSize, hx)) return false;
+            if (hx.empty()) { z = 0; return true; }
             return mpz_set_str(z.get_mpz_t(), hx.c_str(), 16) == 0;
         };
         auto restore_te_stage2_base_from_cache = [&]()->void {
@@ -959,12 +958,13 @@ int App::runECMMarin()
                     uint8_t has_stage2_base = 0;
                     if (!f.read(reinterpret_cast<char*>(&has_stage2_base), sizeof(has_stage2_base))) return -2;
                     if (has_stage2_base) {
-                        if (!read_mpz_blob(f, s2_base_Xpos)) return -2;
-                        if (!read_mpz_blob(f, s2_base_Ypos)) return -2;
-                        if (!read_mpz_blob(f, s2_base_Tpos)) return -2;
-                        if (!read_mpz_blob(f, s2_base_Xneg)) return -2;
-                        if (!read_mpz_blob(f, s2_base_Yneg)) return -2;
-                        if (!read_mpz_blob(f, s2_base_Tneg)) return -2;
+                        const uint64_t blobFileSize = core::ckptlen::fileSizeOf(file);
+                        if (!read_mpz_blob(f, s2_base_Xpos, blobFileSize)) return -2;
+                        if (!read_mpz_blob(f, s2_base_Ypos, blobFileSize)) return -2;
+                        if (!read_mpz_blob(f, s2_base_Tpos, blobFileSize)) return -2;
+                        if (!read_mpz_blob(f, s2_base_Xneg, blobFileSize)) return -2;
+                        if (!read_mpz_blob(f, s2_base_Yneg, blobFileSize)) return -2;
+                        if (!read_mpz_blob(f, s2_base_Tneg, blobFileSize)) return -2;
                         have_s2_base_cache = true;
                     }
                 }

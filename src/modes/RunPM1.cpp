@@ -4,6 +4,7 @@
 #include "core/App.hpp"
 #include "core/QuickChecker.hpp"
 #include "core/Printer.hpp"
+#include "core/CheckpointLength.hpp"
 #include "core/ProofSet.hpp"
 #include "core/ProofSetMarin.hpp"
 #include "math/Carry.hpp"
@@ -4084,6 +4085,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
 
         auto read_ckpt_stage1 = [&](engine* e, const std::string& file)->int{
             File f(file);
+            const uint64_t ckptFileSize = core::ckptlen::fileSizeOf(file);
             if (!f.exists()) return -1;
             std::string backend_reason;
             if (!pm1_checkpoint_backend_matches(file, e, &backend_reason)) {
@@ -4099,10 +4101,9 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
             uint64_t tmp64;
             for (int i = 0; i < 4; ++i) if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
             uint8_t inlot=0; if (!f.read(reinterpret_cast<char*>(&inlot), sizeof(inlot))) return -2;
-            uint32_t eacc_len = 0; if (!f.read(reinterpret_cast<char*>(&eacc_len), sizeof(eacc_len))) return -2;
-            if (eacc_len) { std::string skip(eacc_len, '\0'); if (!f.read(skip.data(), eacc_len)) return -2; }
-            uint32_t wbits_len = 0; if (!f.read(reinterpret_cast<char*>(&wbits_len), sizeof(wbits_len))) return -2;
-            if (wbits_len) { std::string skip(wbits_len, '\0'); if (!f.read(skip.data(), wbits_len)) return -2; }
+            std::string skip;
+            if (!core::ckptlen::readLenPrefixed(f, ckptFileSize, skip)) return -2;
+            if (!core::ckptlen::readLenPrefixed(f, ckptFileSize, skip)) return -2;
             uint64_t chunkIdx=0, startP=0; uint8_t first=0; uint64_t processedBits=0, bitsInChunk=0;
             if (!f.read(reinterpret_cast<char*>(&chunkIdx), sizeof(chunkIdx))) return -2;
             if (!f.read(reinterpret_cast<char*>(&startP), sizeof(startP))) return -2;
@@ -5423,6 +5424,7 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
 
         auto read_ckpt_stage1 = [&](engine* e, const std::string& file)->int{
             File f(file);
+            const uint64_t ckptFileSize = core::ckptlen::fileSizeOf(file);
             if (!f.exists()) return -1;
             std::string backend_reason;
             if (!pm1_checkpoint_backend_matches(file, e, &backend_reason)) {
@@ -5442,11 +5444,10 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
             for (int i = 0; i < 4; ++i) if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
             uint8_t inlot=0; if (!f.read(reinterpret_cast<char*>(&inlot), sizeof(inlot))) return -2;
 
-            uint32_t eacc_len = 0; if (!f.read(reinterpret_cast<char*>(&eacc_len), sizeof(eacc_len))) return -2;
-            if (eacc_len) { std::string skip(eacc_len, '\0'); if (!f.read(skip.data(), eacc_len)) return -2; }
+            std::string skip;
+            if (!core::ckptlen::readLenPrefixed(f, ckptFileSize, skip)) return -2;
 
-            uint32_t wbits_len = 0; if (!f.read(reinterpret_cast<char*>(&wbits_len), sizeof(wbits_len))) return -2;
-            if (wbits_len) { std::string skip(wbits_len, '\0'); if (!f.read(skip.data(), wbits_len)) return -2; }
+            if (!core::ckptlen::readLenPrefixed(f, ckptFileSize, skip)) return -2;
 
             uint64_t chunkIdx=0, startP=0; uint8_t first=0; uint64_t processedBits=0, bitsInChunk=0;
             if (!f.read(reinterpret_cast<char*>(&chunkIdx), sizeof(chunkIdx))) return -2;
@@ -6212,6 +6213,7 @@ Pm1Stage2Result App::runPM1Stage2MarinNKVersion() {
     std::ostringstream ck; ck << "pm1_m_" << pexp << ".ckpt";
     auto read_ckpt_s1 = [&](engine* e, const std::string& file)->int{
         File f(file);
+        const uint64_t ckptFileSize = core::ckptlen::fileSizeOf(file);
         if (!f.exists()) return -1;
         std::string backend_reason;
         if (!pm1_checkpoint_backend_matches(file, e, &backend_reason)) {
@@ -6229,10 +6231,9 @@ Pm1Stage2Result App::runPM1Stage2MarinNKVersion() {
         if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
         if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
         uint8_t inlot=0; if (!f.read(reinterpret_cast<char*>(&inlot), sizeof(inlot))) return -2;
-        uint32_t eacc_len = 0; if (!f.read(reinterpret_cast<char*>(&eacc_len), sizeof(eacc_len))) return -2;
-        if (eacc_len) { std::string skip; skip.resize(eacc_len); if (!f.read(skip.data(), eacc_len)) return -2; }
-        uint32_t wbits_len = 0; if (!f.read(reinterpret_cast<char*>(&wbits_len), sizeof(wbits_len))) return -2;
-        if (wbits_len) { std::string skip; skip.resize(wbits_len); if (!f.read(skip.data(), wbits_len)) return -2; }
+        std::string skip;
+        if (!core::ckptlen::readLenPrefixed(f, ckptFileSize, skip)) return -2;
+        if (!core::ckptlen::readLenPrefixed(f, ckptFileSize, skip)) return -2;
         uint64_t chunkIdx=0, startP=0; uint8_t first=0; uint64_t processedBits=0, bitsInChunk=0;
         if (!f.read(reinterpret_cast<char*>(&chunkIdx), sizeof(chunkIdx))) return -2;
         if (!f.read(reinterpret_cast<char*>(&startP), sizeof(startP))) return -2;
@@ -7110,6 +7111,7 @@ int App::runPM1Marin() {
     };
     auto read_ckpt = [&](const std::string& file, uint64_t& ri, double& et, uint64_t& chk, uint64_t& blks, uint64_t& bib, uint64_t& cbl, uint8_t& inlot, mpz_class& ceacc, mpz_class& cwbits, uint64_t& chunkIdx, uint64_t& startP, uint8_t& first, uint64_t& processedBits, uint64_t& bitsInChunk)->int{
         File f(file);
+        const uint64_t ckptFileSize = core::ckptlen::fileSizeOf(file);
         if (!f.exists()) return -1;
         std::string backend_reason;
         if (!pm1_checkpoint_backend_matches(file, eng, &backend_reason)) {
@@ -7136,14 +7138,12 @@ int App::runPM1Marin() {
         if (!f.read(reinterpret_cast<char*>(&bib), sizeof(bib))) return -2;
         if (!f.read(reinterpret_cast<char*>(&cbl), sizeof(cbl))) return -2;
         if (!f.read(reinterpret_cast<char*>(&inlot), sizeof(inlot))) return -2;
-        uint32_t eacc_len = 0; if (!f.read(reinterpret_cast<char*>(&eacc_len), sizeof(eacc_len))) return -2;
-        std::string eacc_hex; eacc_hex.resize(eacc_len);
-        if (eacc_len && !f.read(eacc_hex.data(), eacc_len)) return -2;
-        if (eacc_len) mpz_set_str(ceacc.get_mpz_t(), eacc_hex.c_str(), 16); else ceacc = 0;
-        uint32_t wbits_len = 0; if (!f.read(reinterpret_cast<char*>(&wbits_len), sizeof(wbits_len))) return -2;
-        std::string wbits_hex; wbits_hex.resize(wbits_len);
-        if (wbits_len && !f.read(wbits_hex.data(), wbits_len)) return -2;
-        if (wbits_len) mpz_set_str(cwbits.get_mpz_t(), wbits_hex.c_str(), 16); else cwbits = 0;
+        std::string eacc_hex;
+        if (!core::ckptlen::readLenPrefixed(f, ckptFileSize, eacc_hex)) return -2;
+        if (!eacc_hex.empty()) mpz_set_str(ceacc.get_mpz_t(), eacc_hex.c_str(), 16); else ceacc = 0;
+        std::string wbits_hex;
+        if (!core::ckptlen::readLenPrefixed(f, ckptFileSize, wbits_hex)) return -2;
+        if (!wbits_hex.empty()) mpz_set_str(cwbits.get_mpz_t(), wbits_hex.c_str(), 16); else cwbits = 0;
         if (!f.read(reinterpret_cast<char*>(&chunkIdx), sizeof(chunkIdx))) return -2;
         if (!f.read(reinterpret_cast<char*>(&startP), sizeof(startP))) return -2;
         if (!f.read(reinterpret_cast<char*>(&first), sizeof(first))) return -2;
@@ -7310,6 +7310,7 @@ int App::runPM1Marin() {
 
             auto read_ckpt_ext = [&](const std::string& file, uint64_t& ri, double& et, uint64_t& chk, uint64_t& blks, uint64_t& bib, uint64_t& cbl, uint8_t& inlot, mpz_class& ceacc, mpz_class& cwbits, uint64_t& chunkIdx, uint64_t& startP, uint8_t& first, uint64_t& processedBits, uint64_t& bitsInChunk)->int{
                 File f(file);
+                const uint64_t ckptFileSize = core::ckptlen::fileSizeOf(file);
                 if (!f.exists()) return -1;
                 std::string backend_reason;
                 if (!pm1_checkpoint_backend_matches(file, eng, &backend_reason)) {
@@ -7327,14 +7328,12 @@ int App::runPM1Marin() {
                 if (!f.read(reinterpret_cast<char*>(&bib), sizeof(bib))) return -2;
                 if (!f.read(reinterpret_cast<char*>(&cbl), sizeof(cbl))) return -2;
                 if (!f.read(reinterpret_cast<char*>(&inlot), sizeof(inlot))) return -2;
-                uint32_t eacc_len = 0; if (!f.read(reinterpret_cast<char*>(&eacc_len), sizeof(eacc_len))) return -2;
-                std::string eacc_hex; eacc_hex.resize(eacc_len);
-                if (eacc_len && !f.read(eacc_hex.data(), eacc_len)) return -2;
-                if (eacc_len) mpz_set_str(ceacc.get_mpz_t(), eacc_hex.c_str(), 16); else ceacc = 0;
-                uint32_t wbits_len = 0; if (!f.read(reinterpret_cast<char*>(&wbits_len), sizeof(wbits_len))) return -2;
-                std::string wbits_hex; wbits_hex.resize(wbits_len);
-                if (wbits_len && !f.read(wbits_hex.data(), wbits_len)) return -2;
-                if (wbits_len) mpz_set_str(cwbits.get_mpz_t(), wbits_hex.c_str(), 16); else cwbits = 0;
+                std::string eacc_hex;
+                if (!core::ckptlen::readLenPrefixed(f, ckptFileSize, eacc_hex)) return -2;
+                if (!eacc_hex.empty()) mpz_set_str(ceacc.get_mpz_t(), eacc_hex.c_str(), 16); else ceacc = 0;
+                std::string wbits_hex;
+                if (!core::ckptlen::readLenPrefixed(f, ckptFileSize, wbits_hex)) return -2;
+                if (!wbits_hex.empty()) mpz_set_str(cwbits.get_mpz_t(), wbits_hex.c_str(), 16); else cwbits = 0;
                 if (!f.read(reinterpret_cast<char*>(&chunkIdx), sizeof(chunkIdx))) return -2;
                 if (!f.read(reinterpret_cast<char*>(&startP), sizeof(startP))) return -2;
                 if (!f.read(reinterpret_cast<char*>(&first), sizeof(first))) return -2;
@@ -8680,6 +8679,7 @@ int App::runPM1Stage3Marin() {
 
             auto read_ckpt_s1 = [&](engine* e, const std::string& file)->int{
                 File f(file);
+                const uint64_t ckptFileSize = core::ckptlen::fileSizeOf(file);
                 if (!f.exists()) return -1;
                 std::string backend_reason;
                 if (!pm1_checkpoint_backend_matches(file, e, &backend_reason)) {
@@ -8697,10 +8697,9 @@ int App::runPM1Stage3Marin() {
                 if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
                 if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
                 uint8_t inlot=0; if (!f.read(reinterpret_cast<char*>(&inlot), sizeof(inlot))) return -2;
-                uint32_t eacc_len = 0; if (!f.read(reinterpret_cast<char*>(&eacc_len), sizeof(eacc_len))) return -2;
-                if (eacc_len) { std::string skip; skip.resize(eacc_len); if (!f.read(skip.data(), eacc_len)) return -2; }
-                uint32_t wbits_len = 0; if (!f.read(reinterpret_cast<char*>(&wbits_len), sizeof(wbits_len))) return -2;
-                if (wbits_len) { std::string skip; skip.resize(wbits_len); if (!f.read(skip.data(), wbits_len)) return -2; }
+                std::string skip;
+                if (!core::ckptlen::readLenPrefixed(f, ckptFileSize, skip)) return -2;
+                if (!core::ckptlen::readLenPrefixed(f, ckptFileSize, skip)) return -2;
                 uint64_t chunkIdx=0, startP=0; uint8_t first=0; uint64_t processedBits=0, bitsInChunk=0;
                 if (!f.read(reinterpret_cast<char*>(&chunkIdx), sizeof(chunkIdx))) return -2;
                 if (!f.read(reinterpret_cast<char*>(&startP), sizeof(startP))) return -2;
@@ -9230,6 +9229,7 @@ int App::runPM1Stage4Marin() {
 
             auto read_ckpt_s1 = [&](engine* e, const std::string& file)->int{
                 File f(file);
+                const uint64_t ckptFileSize = core::ckptlen::fileSizeOf(file);
                 if (!f.exists()) return -1;
                 std::string backend_reason;
                 if (!pm1_checkpoint_backend_matches(file, e, &backend_reason)) {
@@ -9247,10 +9247,9 @@ int App::runPM1Stage4Marin() {
                 if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
                 if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
                 uint8_t inlot=0; if (!f.read(reinterpret_cast<char*>(&inlot), sizeof(inlot))) return -2;
-                uint32_t eacc_len = 0; if (!f.read(reinterpret_cast<char*>(&eacc_len), sizeof(eacc_len))) return -2;
-                if (eacc_len) { std::string skip; skip.resize(eacc_len); if (!f.read(skip.data(), eacc_len)) return -2; }
-                uint32_t wbits_len = 0; if (!f.read(reinterpret_cast<char*>(&wbits_len), sizeof(wbits_len))) return -2;
-                if (wbits_len) { std::string skip; skip.resize(wbits_len); if (!f.read(skip.data(), wbits_len)) return -2; }
+                std::string skip;
+                if (!core::ckptlen::readLenPrefixed(f, ckptFileSize, skip)) return -2;
+                if (!core::ckptlen::readLenPrefixed(f, ckptFileSize, skip)) return -2;
                 uint64_t chunkIdx=0, startP=0; uint8_t first=0; uint64_t processedBits=0, bitsInChunk=0;
                 if (!f.read(reinterpret_cast<char*>(&chunkIdx), sizeof(chunkIdx))) return -2;
                 if (!f.read(reinterpret_cast<char*>(&startP), sizeof(startP))) return -2;
