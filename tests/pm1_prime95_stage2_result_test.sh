@@ -28,7 +28,7 @@ cp canned.json results.json.txt
 STUB
   chmod +x "$WORK/$name/p95/mprime"
   ( cd "$WORK/$name" && ln -s "$ROOT/kernels" kernels &&
-    timeout --signal=INT --kill-after=10s 150 "$ROOT/prmers" 113 -pm1 -b1 4 -b2 2141 -p95path "$WORK/$name/p95" \
+    timeout --signal=INT --kill-after=10s 150 "$ROOT/prmers" 113 -pm1 -b1 4 -b2 2141 ${EXTRA_ARGS:-} -p95path "$WORK/$name/p95" \
       -d "$DEVICE" --noask >run.log 2>&1 || true )
 }
 
@@ -100,5 +100,18 @@ grep -aq 'reported B2=99999999 beyond the requested B2=2141' "$WORK/big/run.log"
 grep -aq 'No factor P-1 (stage 2) until B2 = 2141' "$WORK/big/run.log" || fail "big: B2 not kept at 2141"
 grep -aq '"b2":2141' "$WORK/big/results.txt" || fail "big: results.txt does not record b2=2141"
 if grep -aq '99999999' "$WORK/big/results.txt"; then fail "big: unrequested B2 recorded"; fi
+
+# 5. A handoff with -b2start: the stage 2 Prime95 ran covers (B2Start, B2], and the
+# result must say so; without -b2start it is the plain (B1, B2] with no b2-start.
+EXTRA_ARGS='-b2start 100' run_case start '{"status":"NF", "exponent":113, "worktype":"P-1", "b1":4, "b2":2141, "d":30}'
+grep -aq 'No factor P-1 (stage 2) until B2 = 2141' "$WORK/start/run.log" || fail "start: Prime95 result not used"
+grep -aq '"b2":2141,"b2-start":100' "$WORK/start/results.txt" || fail "start: results.txt does not record b2-start=100"
+if grep -aq 'b2-start' "$WORK/nob2/results.txt"; then fail "nob2: b2-start recorded without -b2start"; fi
+
+# 5b. -b2start with the internal stage 2 (Prime95 result unusable): the default stage 2
+# ignores -b2start and searches (B1, B2], so it must not claim a start bound.
+EXTRA_ARGS='-b2start 100' run_case startbad '{"status":"NF", "exponent":113, "worktype":"P-1", "b1":4, "b2":0, "d":30}'
+ls "$WORK"/startbad/stage2*_result_B2_2141_p_113.txt >/dev/null || fail "startbad: internal stage 2 did not run"
+if grep -aq 'b2-start' "$WORK/startbad/results.txt"; then fail "startbad: b2-start recorded for a stage 2 that ignores it"; fi
 
 echo "pm1 Prime95 stage-2 result test passed"

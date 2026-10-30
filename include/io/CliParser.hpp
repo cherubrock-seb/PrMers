@@ -121,6 +121,9 @@ struct CliOptions {
     bool p95stage2 = false;
     bool pm1_lowmem = false;
     bool pm1_ultralowmem = false;
+    // Set by the run while it builds the result of a stage 2 that really started at B2Start
+    // (the Prime95 handoff), so that the result JSON can report the searched range.
+    bool pm1_stage2_from_b2start = false;
     // True low-memory P-1 Stage 2 from an existing Stage-1 resume.
     // Uses 2 GPU registers and computes H^Q where Q=prod primes(stage2Low,B2].
     // B1 remains the Stage-1 resume bound; B2Start optionally selects stage2Low
