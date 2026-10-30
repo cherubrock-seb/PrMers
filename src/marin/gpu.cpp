@@ -77,8 +77,9 @@ std::string backend_probe_key(const std::uint32_t exponent,
         if (device >= platform.get_device_count()) return {};
         const cl_device_id d = platform.get_device(device);
         std::ostringstream out;
-        out << "schema=2"
+        out << "schema=3"
             << "|prmers=" << core::PRMERS_VERSION
+            << "|aevum-plugin=" << aevum_plugin_identity()
             << "|p=" << exponent
             << "|device-index=" << device
             << "|vendor=" << cl_string(d, CL_DEVICE_VENDOR)

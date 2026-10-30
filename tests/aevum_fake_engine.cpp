@@ -23,7 +23,10 @@ static FakeRuntime* checked(void* handle, std::size_t reg) {
     return rt;
 }
 
-const char* aevum_engine_version() { return "fake-reg-test"; }
+#ifndef FAKE_ENGINE_VERSION
+#define FAKE_ENGINE_VERSION "fake-reg-test"
+#endif
+const char* aevum_engine_version() { return FAKE_ENGINE_VERSION; }
 const char* aevum_engine_last_error() { return last_error.c_str(); }
 int aevum_engine_resolve_fft(std::uint32_t exponent, const char*, char* output, std::size_t output_size) {
     if (exponent < 3 || !output || output_size < 8) {

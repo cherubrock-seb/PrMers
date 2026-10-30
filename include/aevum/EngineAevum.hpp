@@ -37,3 +37,8 @@ std::string aevum_engine_active_plan(const engine* eng);
 // "radix1k=<4|8> <source>" for the 1K radix the Aevum plugin uses on PrMers device `device` (see
 // aevum/Radix1kPolicy.hpp).  `cuda_plugin` is true when the CUDA plugin runs the engine, which is always NVIDIA.
 std::string aevum_radix1k_policy_detail(std::size_t device, bool cuda_plugin = false);
+
+// Identity of the Aevum plugin PrMers loads (version string, path, size and modification time of the library, and of
+// the CUDA plugin next to it when present).  A plugin swapped through AEVUM_ENGINE_LIB, or rebuilt in place, gives a
+// different string.  "unavailable" if no plugin can be loaded.
+std::string aevum_plugin_identity();
