@@ -788,6 +788,10 @@ test-pm1-extend-ckpt: all
 test-pm1-b2start-json:
 	bash tests/test_pm1_b2start_json.sh
 
+.PHONY: test-pm1-b2start-ignored
+test-pm1-b2start-ignored: all
+	bash tests/pm1_b2start_ignored_test.sh $${PRMERS_TEST_DEVICE:-0}
+
 .PHONY: test-marin-reg-offset-wrap
 
 test-marin-reg-offset-wrap:
