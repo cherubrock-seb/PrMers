@@ -6996,7 +6996,10 @@ int App::runPM1Marin() {
             }
         }
 
+        // Prime95 was given B2Start, so the stage 2 it ran covers (B2Start, B2].
+        options.pm1_stage2_from_b2start = true;
         std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
+        options.pm1_stage2_from_b2start = false;
         std::cout << "Manual submission JSON:\n" << json << "\n";
         io::WorktodoManager wm(options);
         const bool saved = wm.saveIndividualJson(options.exponent,

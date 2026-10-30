@@ -21,7 +21,8 @@ static bool has(const std::string& s, const std::string& part) {
     return s.find(part) != std::string::npos;
 }
 
-static std::string make(uint64_t b1, uint64_t b2, uint64_t b2start, bool lowmem, const char* mode = "pm1") {
+static std::string make(uint64_t b1, uint64_t b2, uint64_t b2start, bool lowmem, const char* mode = "pm1",
+                        bool from_b2start = false) {
     io::CliOptions o;
     o.mode = mode;
     o.exponent = 269;
@@ -29,6 +30,7 @@ static std::string make(uint64_t b1, uint64_t b2, uint64_t b2start, bool lowmem,
     o.B2 = b2;
     o.B2Start = b2start;
     o.pm1_lowmem = lowmem;
+    o.pm1_stage2_from_b2start = from_b2start;
     return io::JsonBuilder::generate(o, 16, false, "0000000000000000", "");
 }
 
@@ -46,6 +48,16 @@ int main() {
     // Stage-2 paths that ignore -b2start search (B1, B2] whatever it says.
     j = make(4, 2141, 100, false);
     expect(has(j, "\"b2\":2141,") && !has(j, "b2-start"), "no b2-start when the stage 2 ignores it", j);
+
+    // A stage 2 handed to Prime95 starts at -b2start too, without the low-memory path.
+    j = make(4, 2141, 100, false, "pm1", true);
+    expect(has(j, "\"b1\":4,\"b2\":2141,\"b2-start\":100,"), "Prime95 handoff -b2start is reported", j);
+    j = make(4, 2141, 0, false, "pm1", true);
+    expect(!has(j, "b2-start"), "no b2-start for a Prime95 handoff without -b2start", j);
+    j = make(4, 2141, 4, false, "pm1", true);
+    expect(!has(j, "b2-start"), "no b2-start for a Prime95 handoff when it equals B1", j);
+    j = make(4, 0, 100, false, "pm1", true);
+    expect(!has(j, "b2-start"), "no b2-start for a Prime95 handoff without a stage 2", j);
 
     // Stage 1 only.
     j = make(4, 0, 100, true);
