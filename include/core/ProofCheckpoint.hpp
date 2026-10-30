@@ -14,6 +14,9 @@
 #ifndef _WIN32
 #include <fcntl.h>
 #include <unistd.h>
+#else
+#include <fcntl.h>
+#include <io.h>
 #endif
 
 namespace core {
@@ -29,6 +32,9 @@ public:
 // Ask the OS to push a file written through a stream to the disk, so that a
 // write error is reported here and not after the test is over. Best effort:
 // returns false only when the file could be opened but not synced.
+//
+// Windows has no directory sync (a directory cannot be opened and flushed
+// there), so only the file itself is flushed on Windows.
 inline bool syncFileToDisk(const std::filesystem::path& path) {
 #ifndef _WIN32
     const int fd = ::open(path.c_str(), O_RDONLY);
@@ -37,8 +43,13 @@ inline bool syncFileToDisk(const std::filesystem::path& path) {
     ::close(fd);
     return ok;
 #else
-    (void)path;
-    return true;
+    // _commit is FlushFileBuffers on the file's handle, which needs write
+    // access, so the file is opened for writing (without truncating it).
+    const int fd = ::_wopen(path.c_str(), _O_WRONLY | _O_BINARY);
+    if (fd < 0) return true;
+    const bool ok = ::_commit(fd) == 0;
+    ::_close(fd);
+    return ok;
 #endif
 }
 

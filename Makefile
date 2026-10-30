@@ -414,6 +414,10 @@ test-proof-residue-read-fault: all
 test-proof-checkpoint-readback:
 	bash tests/test_proof_checkpoint_readback.sh
 
+.PHONY: test-proof-checkpoint-sync
+test-proof-checkpoint-sync:
+	python3 tests/proof_checkpoint_sync_source_test.py
+
 test-proof-fallback-power:
 	python3 tests/proof_fallback_power_source_test.py
 

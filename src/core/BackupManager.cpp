@@ -207,6 +207,8 @@ void syncDirectory(const std::string& file) {
         ::close(fd);
     }
 #else
+    // Windows cannot open a directory to flush it; the files themselves are
+    // flushed by syncFileToDisk.
     (void)file;
 #endif
 }
