@@ -1105,3 +1105,29 @@ std::string aevum_radix1k_policy_detail(std::size_t device, bool cuda_plugin) {
     return aevum_policy::radix1k_detail(aevum_policy::radix1k_policy(
         std::getenv("AEVUM_RADIX1K"), apple_build, cuda_plugin || opencl_device_is_nvidia(device)));
 }
+namespace {
+std::string file_identity(const std::filesystem::path& path) {
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(path, ec);
+    if (ec) return path.string() + "@unreadable";
+    const auto mtime = std::filesystem::last_write_time(path, ec);
+    if (ec) return path.string() + "@unreadable";
+    return path.string() + "@" + std::to_string(static_cast<unsigned long long>(size)) + "@" +
+           std::to_string(static_cast<long long>(mtime.time_since_epoch().count()));
+}
+} // namespace
+
+std::string aevum_plugin_identity() {
+    try {
+        const Api& plugin = api();
+        std::string out = std::string("version=") + (plugin.version ? plugin.version() : "unknown") +
+                          ";lib=" + file_identity(plugin.path);
+        const auto cuda = optional_cuda_engine(plugin);
+        std::error_code ec;
+        if (!cuda.empty() && std::filesystem::is_regular_file(cuda, ec))
+            out += ";cuda=" + file_identity(cuda);
+        return out;
+    } catch (const std::exception&) {
+        return "unavailable";
+    }
+}

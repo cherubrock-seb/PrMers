@@ -159,6 +159,10 @@ test-aevum-host:
 test-aevum-reg:
 	bash tests/test_aevum_reg_adapter.sh
 
+.PHONY: test-aevum-plugin-identity
+test-aevum-plugin-identity:
+	bash tests/test_aevum_plugin_identity.sh
+
 test-aevum-create-fallback:
 	bash tests/test_aevum_create_fallback.sh
 
