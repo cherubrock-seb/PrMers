@@ -1136,12 +1136,14 @@ int App::runECMMarin()
         auto mulm = [&](const mpz_class& a, const mpz_class& b)->mpz_class{ mpz_class r; mpz_mul(r.get_mpz_t(), a.get_mpz_t(), b.get_mpz_t()); mpz_mod(r.get_mpz_t(), r.get_mpz_t(), N.get_mpz_t()); if (r<0) r+=N; return r; };
         auto sqrm = [&](const mpz_class& a)->mpz_class{ mpz_class r; mpz_mul(r.get_mpz_t(), a.get_mpz_t(), a.get_mpz_t()); mpz_mod(r.get_mpz_t(), r.get_mpz_t(), N.get_mpz_t()); if (r<0) r+=N; return r; };
 
+        mpz_class invm_factor = 0;   // the factor invm() last exposed (the part not already known)
         auto invm = [&](const mpz_class& a, mpz_class& inv)->int{
             if (mpz_sgn(a.get_mpz_t())==0) return -1;
             if (mpz_invert(inv.get_mpz_t(), a.get_mpz_t(), N.get_mpz_t())) return 0;
             mpz_class g; mpz_gcd(g.get_mpz_t(), a.get_mpz_t(), N.get_mpz_t());
             if (g > 1 && g < N) {
                 bool known = is_known(g);
+                invm_factor = g;
                 std::cout<<"[ECM] "<<(known?"known factor=":"factor=")<<g.get_str()<<std::endl;
                 if (!known) {
                     options.knownFactors.push_back(g.get_str());
@@ -1189,6 +1191,21 @@ int App::runECMMarin()
                       << ", skipping curve" << std::endl;
             delete eng;
             return false;
+};
+        // invm() has already recorded a factor it exposed (as known, in options.knownFactors, and
+        // in result_factor/result_status).  A caller that reports the factor itself takes it back
+        // first, so that the report sees it as new, or as known when it really was.  Returns the
+        // factor.
+        auto take_invm_factor = [&]()->mpz_class{
+            const mpz_class g = invm_factor;
+            if (result_status == "found" && result_factor == g) {
+                const std::string gs = g.get_str();
+                for (size_t i = options.knownFactors.size(); i-- > 0; ) {
+                    if (options.knownFactors[i] == gs) { options.knownFactors.erase(options.knownFactors.begin() + (std::ptrdiff_t)i); break; }
+                }
+            }
+            result_factor = 0; result_status = "NF";
+            return g;
         };
 
         mpz_class A24, x0;
@@ -1761,7 +1778,9 @@ int App::runECMMarin()
                 if (gg == 1) {
                     mpz_class Xv = compute_X_with_dots(eng, (engine::Reg)0, N);
                     mpz_class invZ;
-                    if (invm(Zfin, invZ) == 0) xAff = mulm(Xv, invZ);
+                    const int r_z = invm(Zfin, invZ);
+                    if (r_z == 0) xAff = mulm(Xv, invZ);
+                    else if (r_z == 1) gg = take_invm_factor();
                 }
             } else {
                 mpz_class Tfin = compute_X_with_dots(eng, (engine::Reg)5, N);
@@ -1783,11 +1802,11 @@ int App::runECMMarin()
                     if (r_u == 0) {
                         xAff = mulm(addm(Zv, Yv), inv_den_u);
                     } else if (r_u == 1) {
-                        gg = result_factor > 1 ? result_factor : gg;
+                        gg = take_invm_factor();
                     }
                 }
             }
-            bool found = (gg > 1 && gg < N) || (result_factor > 1 && result_factor < N);
+            bool found = (gg > 1 && gg < N);
 
             double elapsed_stage1 = duration<double>(high_resolution_clock::now() - t0).count();
             { std::ostringstream s1; s1<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 elapsed="<<fixed<<setprecision(2)<<elapsed_stage1<<" s"; std::cout<<s1.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s1.str()); }
@@ -1803,6 +1822,13 @@ int App::runECMMarin()
                 std::error_code ec0;
                 fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
                 fs::remove(ckpt2, ec0); fs::remove(ckpt2 + ".old", ec0); fs::remove(ckpt2 + ".new", ec0);
+
+                if (known) {
+                    // Nothing new: do not publish the factors already known as if they were a result.
+                    std::cout << "[ECM] Curve " << (c+1) << "/" << curves << ": only a known factor, skipping curve" << std::endl;
+                    delete eng;
+                    continue;
+                }
 
                 curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1);
 
@@ -1889,7 +1915,7 @@ int App::runECMMarin()
                     mpz_class invZv;
                     int rz = invm(Zv, invZv);
                     if (rz == 1) {
-                        mpz_class gg_hit = result_factor > 1 ? result_factor : gcd_with_dots(Zv, N);
+                        mpz_class gg_hit = take_invm_factor();
                         return publish_stage2_factor(gg_hit);
                     }
                     if (rz < 0) {
@@ -2206,7 +2232,7 @@ auto setup_stage2_base = [&]() -> int {
                 mpz_class invZs, Qx;
                 int rz = invm(Zs, invZs);
                 if (rz == 1) {
-                    mpz_class gg_hit = result_factor > 1 ? result_factor : gz;
+                    mpz_class gg_hit = take_invm_factor();
                     return publish_stage2_factor(gg_hit);
                 }
                 if (rz < 0) {
@@ -2411,7 +2437,7 @@ auto setup_stage2_base = [&]() -> int {
                     mpz_class invZs, Qx;
                     int rz = invm(Zs, invZs);
                     if (rz == 1) {
-                        mpz_class gg_hit = result_factor > 1 ? result_factor : gz;
+                        mpz_class gg_hit = take_invm_factor();
                         std::cout << std::endl;
                         int factor_rc = publish_stage2_factor(gg_hit);
                         if (factor_rc == 2 && !options.ecm_continue_after_factor) return 0;
