@@ -301,6 +301,24 @@ void test_old_format(const fs::path & root)
 	}
 }
 
+// Gerbicz-Li files of an earlier version left beside a .loop that is missing, empty, zero or unreadable
+// belong to a state that is not being resumed: the fresh start must not pick them up.
+void test_stale_gerbicz_li(const fs::path & root)
+{
+	const auto g = gl(1);
+	for (const char * loop : { (const char *)nullptr, "", "0", "junk", "99999999999999999999999999" }) {
+		const std::string what = std::string("stale Gerbicz-Li files, loop ") + (loop ? "'" + std::string(loop) + "'" : "missing");
+		const fs::path d = fresh_dir(root, "stale");
+		auto words = [&](const std::string & s, const std::vector<uint64_t> & v) {
+			write(d / (base + "." + s), std::string(reinterpret_cast<const char *>(v.data()), v.size() * 8));
+		};
+		words("mers", vec(1)); words("bufd", g.bufd); words("lbufd", g.lastBufd); words("gli", g.correct);
+		write(d / (base + ".isav"), "10"); write(d / (base + ".jsav"), "20");
+		if (loop) write(d / (base + ".loop"), loop);
+		expect_set(d, 0, 0, true, what);
+	}
+}
+
 void test_stage2(const fs::path & root)
 {
 	const std::string b2 = "4451pm1100_200";
@@ -400,6 +418,7 @@ int main()
 	test_old_format(root);
 	test_loop_bound(root);
 	test_stage2(root);
+	test_stale_gerbicz_li(root);
 	test_clear(root);
 	fs::remove_all(root);
 	std::printf("legacy checkpoint set test: %s\n", fails ? "FAIL" : "OK");
