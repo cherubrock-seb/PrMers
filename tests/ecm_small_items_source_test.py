@@ -26,7 +26,7 @@ def test_gcd_n_drops_checkpoints():
         assert 'gcd=N, retrying' not in src, name
         assert 'stage 1 gcd=N' in src, name
         for m in re.finditer(r'stage 1 gcd=N[^\n]*\n(.*?)continue;', src, re.S):
-            assert 'fs::remove(ckpt_file' in m.group(1), name + ': stage-1 gcd=N leaves the checkpoint behind'
+            assert ('fs::remove(ckpt_file' in m.group(1) or 'ckpt1_loc.removeAll()' in m.group(1)), name + ': stage-1 gcd=N leaves the checkpoint behind'
 
 
 test_json_base_seed()
