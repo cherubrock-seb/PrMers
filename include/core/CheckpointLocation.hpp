@@ -11,6 +11,8 @@
 #include "core/ProofLocation.hpp"
 
 #include <filesystem>
+#include <mutex>
+#include <set>
 #include <string>
 #include <system_error>
 
@@ -46,26 +48,49 @@ public:
         return !std::filesystem::exists(file_, ec) && !std::filesystem::exists(file_ + ".old", ec);
     }
 
-    // The run resumed from the old location: remove it once the run's own checkpoint is
-    // written, or at the end of the job.
-    void adoptLegacy() { legacyPending_ = true; }
-    bool legacyPending() const { return legacyPending_; }
-    void removeLegacy() {
-        if (!legacyPending_) return;
+    // The file to read: the checkpoint under the save path or, when there is none there
+    // (legacyCandidate) but the working directory has one of this name, that one (an older
+    // version's). A caller that resumes from it calls adoptLegacy().
+    std::string readFile() const {
+        if (!legacyCandidate()) return file_;
         std::error_code ec;
-        std::filesystem::remove(name_, ec);
-        std::filesystem::remove(name_ + ".old", ec);
-        std::filesystem::remove(name_ + ".new", ec);
+        if (std::filesystem::exists(name_, ec) || std::filesystem::exists(name_ + ".old", ec)) return name_;
+        return file_;
+    }
+    bool isLegacy(const std::string& path) const { return !dirIsCwd_ && path == name_; }
+
+    // The run resumed from the old location: remove it once the run's own checkpoint is
+    // written, or at the end of the job. The adoption is recorded for the process, so the
+    // stage that finishes the job removes it even when another stage read it.
+    void adoptLegacy() {
+        legacyPending_ = true;
+        std::lock_guard<std::mutex> lock(adoptedMutex());
+        adopted().insert(name_);
+    }
+    bool legacyPending() const {
+        if (legacyPending_) return true;
+        std::lock_guard<std::mutex> lock(adoptedMutex());
+        return adopted().count(name_) != 0;
+    }
+    void removeLegacy() {
+        if (!legacyPending()) return;
+        std::error_code ec;
+        // with the backend sidecars some checkpoints keep next to them (<name>.backend)
+        for (const char* suffix : {"", ".old", ".new", ".backend", ".backend.new"}) {
+            std::filesystem::remove(name_ + suffix, ec);
+        }
         legacyPending_ = false;
+        std::lock_guard<std::mutex> lock(adoptedMutex());
+        adopted().erase(name_);
     }
 
-    // Removes the checkpoint family: the one under the save path and any old-location copy
-    // this run adopted.
+    // Removes the checkpoint family (with any backend sidecar): the one under the save path and
+    // any old-location copy this run adopted.
     void removeAll() {
         std::error_code ec;
-        std::filesystem::remove(file_, ec);
-        std::filesystem::remove(file_ + ".old", ec);
-        std::filesystem::remove(file_ + ".new", ec);
+        for (const char* suffix : {"", ".old", ".new", ".backend", ".backend.new"}) {
+            std::filesystem::remove(file_ + suffix, ec);
+        }
         removeLegacy();
     }
 
@@ -76,6 +101,9 @@ public:
     }
 
 private:
+    static std::set<std::string>& adopted() { static std::set<std::string> names; return names; }
+    static std::mutex& adoptedMutex() { static std::mutex m; return m; }
+
     std::string name_;
     std::filesystem::path dir_;
     bool dirIsCwd_;
