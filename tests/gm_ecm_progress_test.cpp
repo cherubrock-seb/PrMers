@@ -44,6 +44,36 @@ int main() {
     } catch (int) {}
     CHECK(gp::load(f, "k") == 2);
 
+    // Write failure (full disk): the temp file is /dev/full, so the buffered
+    // data fails on flush.  The previous counter must survive and no temp
+    // file may be left behind.
+    if (fs::exists("/dev/full")) {
+        gp::save(f, "k", 5);
+        CHECK(gp::load(f, "k") == 5);
+        const std::string tmp = f.string() + ".new";
+        std::error_code ec;
+        fs::create_symlink("/dev/full", tmp, ec);
+        if (!ec) {
+            gp::save(f, "k", 6);
+            CHECK(gp::load(f, "k") == 5);
+            CHECK(!fs::is_symlink(f));
+            CHECK(!fs::is_symlink(tmp) && !fs::exists(tmp));
+        }
+    }
+
+    // Rename onto a directory fails; the temp file is cleaned up.
+    {
+        const fs::path blocked = dir / "blocked.done";
+        fs::create_directories(blocked / "child");
+        gp::save(blocked, "k", 1);
+        CHECK(!fs::exists(blocked.string() + ".new"));
+        fs::remove_all(blocked);
+    }
+
+    // Unwritable location: save must not throw.
+    gp::save(dir / "no_such_dir" / "x.done", "k", 1);
+    CHECK(!fs::exists(dir / "no_such_dir"));
+
     fs::remove_all(dir);
     std::cout << "GM ECM progress counter test passed\n";
     return 0;
