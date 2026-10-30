@@ -12,6 +12,32 @@
 #include <vector>
 #include <string>
 #include <cstring>
+#include <memory>
+
+// Makes `ctx` current on this thread for the scope (cuCtxPushCurrent) and restores the caller's context after
+// (cuCtxPopCurrent).  A CUDA object is freed in the context it was created in: with several contexts alive (several
+// devices or workers, autotune contexts, engines created and destroyed through the engine API) that is not
+// necessarily the one the shim made current last.  A null ctx changes nothing.
+class CudaContextScope {
+public:
+  explicit CudaContextScope(CUcontext ctx)
+    : status_(ctx ? cuCtxPushCurrent(ctx) : CUDA_SUCCESS), pushed_(ctx && status_ == CUDA_SUCCESS) {}
+  ~CudaContextScope() {
+    if (pushed_) {
+      CUcontext popped{};
+      cuCtxPopCurrent(&popped);
+    }
+  }
+  CudaContextScope(const CudaContextScope&) = delete;
+  CudaContextScope& operator=(const CudaContextScope&) = delete;
+
+  // CUDA_SUCCESS, or why `ctx` could not be made current (e.g. it was destroyed).
+  CUresult status() const { return status_; }
+
+private:
+  CUresult status_;
+  bool pushed_;
+};
 
 // ---- Opaque handle wrappers ----
 // OpenCL uses opaque pointer types (struct _cl_foo*).
@@ -34,6 +60,7 @@ struct _cl_command_queue {
   cl_context context;
   bool profiling;
   AevumCudaGraphBatch* squareGraph{nullptr};
+  CUcontext owner{};   // the context the stream was created in (context->ctx; the cl_context may be released first)
 };
 typedef _cl_command_queue* cl_command_queue;
 
@@ -41,6 +68,7 @@ typedef _cl_command_queue* cl_command_queue;
 struct _cl_mem {
   CUdeviceptr ptr;
   size_t size;
+  CUcontext owner{};   // the context the memory was allocated in, and is freed in
 };
 typedef _cl_mem* cl_mem;
 
@@ -48,11 +76,14 @@ typedef _cl_mem* cl_mem;
 struct _cl_program {
   std::string source;     // OpenCL source (before NVRTC compilation)
   std::string preprocessedSource; // CUDA source after preprocessOpenCL (for parsing __launch_bounds__)
-  std::string ptx;        // Compiled PTX (after NVRTC compilation)
+  std::string ptx;        // Compiled PTX (after NVRTC compilation); always the text: clCreateKernel reads .maxntid from it
+  std::string cubin;      // NVRTC's CUBIN for this device's sm_XY, when it produced one; loaded ahead of the PTX JIT
   CUmodule module;        // Loaded module (after cuModuleLoadData)
   bool compiled;
   bool moduleLoaded;
   bool kernelExported{false}; // Prevent replacement while an existing CUfunction refers to this module
+  std::shared_ptr<void> moduleRef; // Keeps `module` loaded; shared with every kernel created from it (CudaModuleLife.h)
+  CUcontext owner{};      // the program's context: its module is loaded there, and its kernels run there
 
   _cl_program() : module{}, compiled{false}, moduleLoaded{false} {}
 };
@@ -62,7 +93,9 @@ typedef _cl_program* cl_program;
 struct _cl_kernel {
   CUfunction func;
   std::string name;
-  CUmodule parentModule;  // Keep reference so module isn't unloaded
+  CUmodule parentModule;
+  std::shared_ptr<void> moduleRef;  // Keeps parentModule loaded after the program is released (CudaModuleLife.h)
+  CUcontext owner{};      // the context of parentModule (the program's)
   int numArgs;
   int reqWorkGroupSize;   // From __launch_bounds__(N) in source, matches OpenCL reqd_work_group_size
 
@@ -109,9 +142,13 @@ struct _cl_event {
   CUevent end;
   bool hasTimings;
   u32 commandType;
+  CUcontext owner;   // the context current when the event was made: cuEventCreate creates its events there
 
-  _cl_event() : start{}, end{}, hasTimings{false}, commandType{0} {}
+  _cl_event() : start{}, end{}, hasTimings{false}, commandType{0}, owner{} { cuCtxGetCurrent(&owner); }
   ~_cl_event() {
+    if (!start && !end) return;
+    CudaContextScope scope(owner);
+    if (scope.status() != CUDA_SUCCESS) return;   // its context is gone, and cuCtxDestroy destroyed its events
     if (start) cuEventDestroy(start);
     if (end) cuEventDestroy(end);
   }
@@ -218,9 +255,10 @@ using cl_queue = cl_command_queue;
 #define CL_DEVICE_COMPUTE_CAPABILITY_MAJOR_NV     0x4000
 #define CL_DEVICE_COMPUTE_CAPABILITY_MINOR_NV     0x4001
 
-// AMD-specific (unused but must exist for compilation)
+// AMD-specific; the shim answers CL_DEVICE_TOPOLOGY_AMD from the CUDA device's PCI bus id
 #define CL_DEVICE_PCIE_ID_AMD           0x4034
 #define CL_DEVICE_TOPOLOGY_AMD          0x4037
+#define CL_DEVICE_TOPOLOGY_TYPE_PCIE_AMD 1
 #define CL_DEVICE_BOARD_NAME_AMD        0x4038
 #define CL_DEVICE_GLOBAL_FREE_MEMORY_AMD 0x4039
 #define CL_DEVICE_WAVEFRONT_WIDTH_AMD   0x4043

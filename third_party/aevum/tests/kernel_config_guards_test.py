@@ -62,6 +62,14 @@ def main():
         expect(failures, "FUSE_WEIGHT_BUTTERFLY=1", fft, {"FUSE_WEIGHT_BUTTERFLY": 1}, False)
         expect(failures, "FUSE_WEIGHT_BUTTERFLY=0", fft, {"FUSE_WEIGHT_BUTTERFLY": 0}, True)
 
+    # carryFused's OLD_FENCE=0 hand-off needs a lock-step wavefront (AMD) or a warp barrier (NVIDIA PTX); without
+    # either, sync() is empty and the hand-off races.  (NO_ASM=1 is set here, so NVIDIA has no PTX either.)
+    for fft in FFT_TYPES:
+        expect(failures, "OLD_FENCE=0 without AMD or PTX", fft, {"OLD_FENCE": 0}, False)
+        expect(failures, "OLD_FENCE=0 on NVIDIA without PTX", fft, {"OLD_FENCE": 0, "NVIDIAGPU": 1, "CC": 860}, False)
+        expect(failures, "OLD_FENCE=0 on AMD", fft, {"OLD_FENCE": 0, "AMDGPU": 1, "WAVEFRONT": 64}, True)
+        expect(failures, "OLD_FENCE=1", fft, {"OLD_FENCE": 1}, True)
+
     for f in failures:
         print("FAIL:", f)
     if failures:

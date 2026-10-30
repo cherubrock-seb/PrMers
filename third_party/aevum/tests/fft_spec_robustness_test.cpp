@@ -46,6 +46,32 @@ int main() {
       return 1;
     }
   }
+  // -tune / -info shapes (FFTShape::multiSpec) skip FFTConfig's spec checks.  A too-small shape drove middle to 0 in the
+  // FFTShape bpw fallback, which then looped forever ("-tune -fft 128:2:128" hung); out-of-range shapes must be refused.
+  for (const char* bad : {"128:2:128", "64:1:64", "2K:2:256", "256:0:256", "256:17:256", "256:2:128", "8K:2:256", "1:128:4:128"}) {
+    bool refused = false;
+    try { (void) FFTShape::multiSpec(bad); } catch (const char*) { refused = true; }
+    if (!refused) {
+      std::cerr << "shape check: '" << bad << "' was accepted\n";
+      return 1;
+    }
+  }
+  // Every shape FFTConfig accepts still builds, for every FFT type (the bpw fallback constructs intermediate shapes).
+  for (int t : {0, 1, 2, 3, 4, 50, 51, 52, 53}) {
+    for (u32 w : {256u, 512u, 1024u, 4096u}) {
+      for (u32 m = 1; m <= 16; ++m) {
+        for (u32 h : {256u, 512u, 1024u}) {
+          try {
+            FFTShape shape{(FFT_TYPES) t, w, m, h};
+            if (shape.maxBpw() <= 0) { std::cerr << "shape " << shape.spec() << " has no bpw\n"; return 1; }
+          } catch (...) {
+            std::cerr << "valid shape " << t << ":" << w << ":" << m << ":" << h << " was rejected\n";
+            return 1;
+          }
+        }
+      }
+    }
+  }
   std::cout << "ok\n";
   return 0;
 }

@@ -6,6 +6,7 @@
 #include "clwrap.h"
 #include "gpuid.h"
 #include "Proof.h"
+#include "StrictInt.h"
 
 #include <vector>
 #include <string>
@@ -16,8 +17,8 @@
 #include <sstream>
 #include <algorithm>
 
-// This is a copy of the args.verbose flag.  It allows the CUDA wrapper to access the flag.
-bool prpll_verbose = 0;
+// This is a copy of the args.verbose level.  It allows the CUDA wrapper to access the value.
+int prpll_verbose = 0;
 
 int Args::value(const string& key, int valNotFound) const {
   auto it = flags.find(key);
@@ -95,6 +96,7 @@ vector<KeyVal> Args::splitUses(string ss) { // pass by value is intentional
 
 void Args::readConfig(const fs::path& path) {
   if (File file = File::openRead(path)) {
+    file.allowUnterminatedLastLine();
     for (string line : file) {
       line = rstripNewline(line);
       parse(line);
@@ -148,7 +150,7 @@ named "config.txt" in the Aevum run directory.
 -pool <dir>        : specify a directory with the shared (pooled) worktodo.txt and results.txt
                      Multiple Aevum instances, each in its own directory, can share a pool of assignments and report
                      the results back to the common pool.
--verbose           : print more log, useful for developers
+-verbose [<level>] : print more log, useful for developers; level 99 also runs the developer self-tests
 -version           : print only the version and exit
 -user <name>       : specify the mersenne.org user name (for result reporting)
 -workers <N>       : specify the number of parallel PRP tests to run (default 1)
@@ -204,11 +206,15 @@ named "config.txt" in the Aevum run directory.
   -use INPLACE=n   : Perform tranforms in-place.  Great if the reduced memory usage fits in the GPU's L2 cache.
                      0 = not in-place, 1 = nVidia friendly access pattern, 2 = AMD friendly access pattern.
   -use PAD=<val>   : insert pad bytes to possibly improve memory access patterns.  Val is number bytes to pad.
+  -use CS_FENCE=0|1 : device-scope release/acquire fences in carryFused's hand-offs between workgroups.
+                     Default 1 except on AMD and nVidia.  If carryFused gives errors that -carry long does not, try 1.
+  -use CS_ATOMIC=0|1 : carryFused's carry shuttle accessed with device-scope atomics.  Default 1 except on AMD and nVidia.
   -use MIDDLE_IN_LDS_TRANSPOSE=0|1  : Transpose values in local memory before writing to global memory
   -use MIDDLE_OUT_LDS_TRANSPOSE=0|1 : Transpose values in local memory before writing to global memory
   -use TABMUL_CHAIN=<val>: Controls how trig values are obtained in WIDTH and HEIGHT when FFT-spec is 1.
-                     0 = Read one trig value and compute the next 3 or 7.
-                     1 = All trig values are pre-computed and read from memmory.
+                     0 = All trig values are pre-computed and read from memory.
+                     1 = Read one trig value and compute the next 3 or 7 (chained multiplies, slightly less accurate).
+                     TABMUL_CHAIN31, TABMUL_CHAIN32 and TABMUL_CHAIN61 do the same for the M31, FP32 and M61 parts.
 
   -use DEBUG       : enable asserts in OpenCL kernels (slow, developers)
 
@@ -336,8 +342,13 @@ void Args::parse(const string& line) {
     } else if (key == "-carryTune") {
       carryTune = true;
     } else if (key == "-verbose" || key == "-v") {
-      verbose = true;
-      prpll_verbose = true;
+      int level = 1;
+      if (!s.empty() && (!parseStrictInt(s, level) || level < 0)) {
+        log("-verbose expects an optional level >= 0 (got '%s')\n", s.c_str());
+        throw "-verbose [<level>]";
+      }
+      verbose = level;
+      prpll_verbose = level;
     } else if (key == "-time") {
       profile = true;
     } else if (key == "-workers") {

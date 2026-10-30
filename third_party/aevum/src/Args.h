@@ -62,7 +62,9 @@ public:
 
   bool safeMath = true;
   bool clean = true;
-  bool verbose = false;
+  int verbose = 0;               // -verbose [level]: 0 off, 1 (the default level) more log
+  // -verbose at this level or above also runs the developer self-tests (Gpu::selftestTrig) on every Gpu creation.
+  static constexpr int VERBOSE_SELFTEST = 99;
   bool useCache = false;
   bool profile = false;
   bool smallest = false;

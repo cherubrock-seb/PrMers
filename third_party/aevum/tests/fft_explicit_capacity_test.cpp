@@ -57,6 +57,12 @@ int main() {
   require(!refused(args, 100000007u, small), "AEVUM_ALLOW_OVERCAPACITY_PLAN=1 allows an over-capacity plan");
   unsetenv("AEVUM_ALLOW_OVERCAPACITY_PLAN");
 
+  // Measured limits of the two 4K:16:1K rows that used to carry unmeasured estimates the FFTs cannot reach
+  // (ported from gpuowl 2de58aef).  The type-1 PFA9 plan of the same width and height inherits the row.
+  require(FFTShape{"1:4K:16:1K"}.maxBpw() == 37.12f, "1:4K:16:1K bpw limit");
+  require(FFTShape{"3:4K:16:1K"}.maxBpw() == 22.42f, "3:4K:16:1K bpw limit");
+  require(FFTShape{FFT3161, 4096, 9, 1024}.maxBpw() == 37.12f - 0.20f, "1:4K:9:1K PFA bpw limit follows 1:4K:16:1K");
+
 #if !defined(__APPLE__)
   // The PRP boundary bridge plan must keep resolving across the range it is selected for.
   require(!refused(args, 197000003u, "4:512:8:512:202"), "type-4 bridge plan at 197M must stay within capacity");

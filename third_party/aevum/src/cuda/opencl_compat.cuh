@@ -103,6 +103,9 @@ typedef unsigned long long u64;
 #ifndef M_SQRT1_2
 #define M_SQRT1_2 0.70710678118654752440
 #endif
+#ifndef M_SQRT1_2_F
+#define M_SQRT1_2_F 0.70710678118654752440f
+#endif
 
 // ---- Vector arithmetic operators ----
 // OpenCL supports +, -, *, / on vector types natively. CUDA does not.
@@ -288,6 +291,9 @@ __device__ __forceinline__ unsigned int atomic_load_uint(volatile unsigned int* 
 }
 #define atomic_store(p, v) atomic_store_uint((volatile unsigned int*)(p), (unsigned int)(v))
 #define atomic_load_explicit(p, order, scope) atomic_load_uint((volatile unsigned int*)(p))
+#define atomic_store_explicit(p, v, order, scope) atomic_store_uint((volatile unsigned int*)(p), (unsigned int)(v))
+// Device-scope fence, for -use CS_FENCE=1 (carryfused.cl).  Flags, order and scope are ignored: __threadfence() orders all memory at device scope.
+#define atomic_work_item_fence(flags, order, scope) __threadfence()
 #define memory_order_relaxed 0
 #define memory_order_acquire 0
 #define memory_order_release 0

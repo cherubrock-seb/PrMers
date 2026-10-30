@@ -140,7 +140,13 @@ i32 RNDVALfloatToInt(float d) {
 // map abs(carry) to floats, with 2^32 corresponding to 1.0
 // So that the maximum CARRY32 abs(carry), 2^31, is mapped to 0.5 (the same as the maximum ROE)
 float OVERLOAD boundCarry(i32 c) { return ldexp(fabs((float) c), -32); }
-float OVERLOAD boundCarry(i64 c) { return ldexp(fabs((float) (i32) (c >> 8)), -24); }
+
+// A 64-bit carry.  The FFT types that can also run with 32-bit carries (FFT64, FFT3231) measure it against CARRY32's 2^31, for
+// -carryTune (valid while abs(carry) < 2^39).  The others only have 64-bit carries: there 2^63, their overflow, maps to 0.5.
+float OVERLOAD boundCarry(i64 c) {
+  if (FFT_TYPE == FFT64 || FFT_TYPE == FFT3231) { return ldexp(fabs((float) (i32) (c >> 8)), -24); }
+  return boundCarry((i32) (c >> 32));
+}
 
 #if STATS || ROE
 void updateStats(global uint *bufROE, u32 posROE, float roundMax) {
@@ -354,34 +360,8 @@ i96 weightAndCarryOne(T u, Z31 u31, T invWeight, u32 m31_invWeight, bool hasInCa
 
 #elif FFT_TYPE == FFT3231
 
-// Apply inverse weight, add in optional carry, calculate roundoff error, convert to integer. Handle MUL3.
-i64 weightAndCarryOne(float uF2, Z31 u31, float F2_invWeight, u32 m31_invWeight, i32 inCarry, float* maxROE) {
-
-  // Apply inverse weight and get the Z31 data
-  u31 = shr(u31, m31_invWeight);
-  u32 n31 = get_Z31(u31);
-
-  // The final result must be n31 mod M31.  Use FP32 data to calculate this value.
-  uF2 = fma(uF2, F2_invWeight, - (float) n31);                           // This should be close to a multiple of M31
-  float uF2int = fma(uF2, 4.656612875245796924105750827168e-10f, RNDVAL);   // Divide by M31 and round to int
-  i32 nF2 = RNDVALfloatToInt(uF2int);
-
-  i64 v = (((i64) nF2 << 31) | n31) - nF2;         // nF2 * M31 + n31
-
-  // Optionally calculate roundoff error
-  float roundoff = fabs(fma(uF2, 4.656612875245796924105750827168e-10f, RNDVAL - uF2int));
-  *maxROE = max(*maxROE, roundoff);
-
-  // Mul by 3 and add carry
-#if MUL3
-  v = v * 3;
-#endif
-  return v + inCarry;
-}
-
-/**************************************************************************/
-/*    Similar to above, but for a hybrid FFT based on FP32 & GF(M61^2)    */
-/**************************************************************************/
+// Type50 weightAndCarryOne is instantiated in carryinc.cl so its incoming
+// carry follows iCARRY (32-bit or 64-bit) instead of being truncated to i32.
 
 #elif FFT_TYPE == FFT3261
 

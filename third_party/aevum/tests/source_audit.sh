@@ -3,6 +3,7 @@ python3 tests/type2_prp_auto_source_test.py
 set -euo pipefail
 trap 'echo "::error file=${BASH_SOURCE[0]},line=${LINENO}::${BASH_COMMAND}" >&2' ERR
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+python3 "$ROOT/tests/forced_fft_worktodo_regression_test.py"
 grep -q 'for (enum FFT_TYPES type : {FFT3161})' "$ROOT/src/FFTConfig.cpp"
 grep -q 'json("name", "aevum")' "$ROOT/src/Task.cpp"
 grep -q 'Aevum %s starting' "$ROOT/src/main.cpp"

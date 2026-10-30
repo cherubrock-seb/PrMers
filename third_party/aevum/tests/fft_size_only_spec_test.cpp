@@ -35,6 +35,48 @@ int main() {
     }
   }
 
+  // A type prefix on a size: the size is the part after the prefix, and the shape is of the requested type.
+  // The whole spec used to be split on '-', so "1:8M" was read as the size 1 (times the trailing M) and the prefix was
+  // dropped, so "4:2M" became an FFT3161 of 4M.
+  struct Prefixed { const char* spec; FFT_TYPES type; u32 size; };
+  for (const Prefixed& p : {Prefixed{"1:8M", FFT3161, 8u << 20}, Prefixed{"1:2M", FFT3161, 2u << 20},
+                            Prefixed{"4:2M", FFT323161, 2u << 20}, Prefixed{"4:8M", FFT323161, 8u << 20},
+                            Prefixed{"2:1M", FFT3261, 1u << 20}, Prefixed{"0:6.5M", FFT64, 6815744u}}) {
+    try {
+      FFTConfig fft{p.spec};
+      std::cout << p.spec << " -> " << fft.spec() << "\n";
+      require(fft.shape.fft_type == p.type, "prefixed size-only spec resolved to the wrong FFT type");
+      require(fft.size() == p.size, "prefixed size-only spec resolved to the wrong size");
+      for (const FFTShape& shape : FFTShape::multiSpec(p.spec)) {
+        require(shape.fft_type == p.type && shape.size() == p.size, "multiSpec of a prefixed size returned another type or size");
+      }
+    } catch (const std::runtime_error&) {
+      throw;
+    } catch (...) {
+      std::cerr << "prefixed size-only spec '" << p.spec << "' threw\n";
+      return 1;
+    }
+  }
+  // A prefixed range keeps the prefix's type and both bounds.
+  {
+    auto shapes = FFTShape::multiSpec("4:1M-4M");
+    require(!shapes.empty(), "prefixed size range found nothing");
+    for (const FFTShape& shape : shapes) {
+      require(shape.fft_type == FFT323161 && shape.size() >= (1u << 20) && shape.size() <= (4u << 20),
+              "prefixed size range returned another type or size");
+    }
+  }
+  // An unprefixed size or range is unchanged: FFT3161 only.
+  for (const FFTShape& shape : FFTShape::multiSpec("1M-4M")) {
+    require(shape.fft_type == FFT3161, "unprefixed size range must stay FFT3161");
+  }
+  // A bare prefix is not a spec.
+  for (const char* bad : {"1:", "4:"}) {
+    bool refused = false;
+    try { (void) FFTShape::multiSpec(bad); } catch (const char*) { refused = true; }
+    require(refused, "a bare type prefix must be refused");
+  }
+
   // The 3/4/5-component forms must keep working.
   require(FFTConfig{"256:2:256"}.size() == 256 * 2 * 256 * 2, "3-component spec");
   require(FFTConfig{"256:2:256:212"}.variant == 212, "4-component spec");

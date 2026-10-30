@@ -341,9 +341,29 @@ string getBuildLog(cl_program program, cl_device_id deviceId) {
   return {};
 }
 
+Program loadBinaryBytes(cl_context context, cl_device_id id, const string& bytes, string_view name) {
+  if (bytes.empty()) return {};
+
+  size_t size = bytes.size();
+  const unsigned char *ptr = reinterpret_cast<const unsigned char *>(bytes.c_str());
+  int err = 0;
+  cl_program program = clCreateProgramWithBinary(context, 1, &id, &size, &ptr, NULL, &err);
+  if (err) {
+    log("Load binary %s : %s\n", string(name).c_str(), errMes(err).c_str());
+    return {};
+  }
+  Program holder{program};
+  if ((err = clBuildProgram(program, 1, &id, NULL, NULL, NULL))) {
+    log("Build binary %s : %s\n", string(name).c_str(), errMes(err).c_str());
+    return {};
+  }
+  return holder;
+}
+
 Program loadBinary(cl_context context, cl_device_id id, string_view fileName) {
   File f = File::openRead(fileName);
-  if (!f) { return {}; }
+  if (!f) return {};
+
   string bytes;
   try {
     bytes = f.readAll();
@@ -355,21 +375,7 @@ Program loadBinary(cl_context context, cl_device_id id, string_view fileName) {
     log("Ignoring unreadable kernel cache entry %s\n", string(fileName).c_str());
     return {};
   }
-
-  size_t size = bytes.size();
-  const unsigned char *ptr = reinterpret_cast<const unsigned char *>(bytes.c_str());
-  int err = 0;
-  cl_program program = clCreateProgramWithBinary(context, 1, &id, &size, &ptr, NULL, &err);
-  if (err) {
-    log("Load binary %s : %s\n", string(fileName).c_str(), errMes(err).c_str());
-    return {};
-  }
-  Program holder{program};   // own the handle from here on, so a failed build releases it
-  if ((err = clBuildProgram(program, 1, &id, NULL, NULL, NULL))) {
-    log("Build binary %s : %s\n", string(fileName).c_str(), errMes(err).c_str());
-    return {};
-  }
-  return holder;
+  return loadBinaryBytes(context, id, bytes, fileName);
 }
 
 string getBinary(cl_program program) {

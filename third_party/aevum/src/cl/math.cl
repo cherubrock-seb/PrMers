@@ -13,6 +13,10 @@ u64 OVERLOAD make_u64(u32 hi, u32 lo) { union { uint2 ui2; u64 ul; } u; u.ui2.x 
 i64 OVERLOAD make_i64(i32 hi, u32 lo) { union { uint2 ui2; u64 ul; } u; u.ui2.x = lo; u.ui2.y = hi; return u.ul; }
 
 // A primitive partial implementation of an i96 integer type
+// NOTE: the two-argument constructors use two different conventions, told apart only by the type of "lo":
+//       make_i96(hi, u32 lo) places hi at bit 32 (value = hi * 2^32 + lo)
+//       make_i96(hi, u64 lo) places hi at bit 64 (value = hi * 2^64 + lo)
+//       Every implementation below must provide both, or a caller passing a u32 "lo" silently widens to the bit-64 form.
 #if 1
 // An all 32-bit implementation.  The add and subtract routines desperately need to use ASM with add.cc and sub.cc PTX instructions.
 // This version might be best on AMD and Intel if we can generate add-with-carry instructions.
@@ -63,6 +67,7 @@ i96 OVERLOAD sub(i96 a, i32 b) { return sub(a, make_i96(b)); }
 typedef struct { __int128 x; } i96;
 i96 OVERLOAD make_i96(i64 v) { i96 val; val.x = v; return val; }
 i96 OVERLOAD make_i96(i32 v) { i96 val; val.x = v; return val; }
+i96 OVERLOAD make_i96(i64 hi, u32 lo) { i96 val; val.x = ((__int128)hi << 32) + lo; return val; }
 i96 OVERLOAD make_i96(i64 hi, u64 lo) { i96 val; val.x = ((unsigned __int128)hi << 64) + lo; return val; }
 i96 OVERLOAD make_i96(i32 hi, u64 lo) { return make_i96((i64)hi, lo); }
 u32 i96_hi32(i96 val) { return (unsigned __int128)val.x >> 64; }
@@ -81,13 +86,14 @@ i96 OVERLOAD sub(i96 a, i32 b) { return sub(a, make_i96(b)); }
 typedef struct { u64 lo64; u32 hi32; } i96;
 i96 OVERLOAD make_i96(i64 v) { i96 val; val.hi32 = v >> 63, val.lo64 = v; return val; }
 i96 OVERLOAD make_i96(i32 v) { return make_i96((i64)v); }
+i96 OVERLOAD make_i96(i64 hi, u32 lo) { i96 val; val.hi32 = (u64)hi >> 32, val.lo64 = ((u64)hi << 32) | lo; return val; }
 i96 OVERLOAD make_i96(i64 hi, u64 lo) { i96 val; val.hi32 = hi, val.lo64 = lo; return val; }
 i96 OVERLOAD make_i96(i32 hi, u64 lo) { i96 val; val.hi32 = hi, val.lo64 = lo; return val; }
 u32 i96_hi32(i96 val) { return val.hi32; }
 u32 i96_mid32(i96 val) { return hi32(val.lo64); }
 u32 i96_lo32(i96 val) { return val.lo64; }
 u64 i96_lo64(i96 val) { return val.lo64; }
-u64 i96_hi64(i96 val) { return make_64(val.hi32, i96_mid32(val)); }
+u64 i96_hi64(i96 val) { return make_u64(val.hi32, i96_mid32(val)); }
 i96 OVERLOAD add(i96 a, i96 b) { i96 val; val.lo64 = a.lo64 + b.lo64; val.hi32 = a.hi32 + b.hi32 + (val.lo64 < a.lo64); return val; }
 i96 OVERLOAD add(i96 a, i64 b) { return add(a, make_i96(b)); }
 i96 OVERLOAD sub(i96 a, i96 b) { i96 val; val.lo64 = a.lo64 - b.lo64; val.hi32 = a.hi32 - b.hi32 - (val.lo64 > a.lo64); return val; }
@@ -615,20 +621,20 @@ void cmul_a_by_fancyb_and_conjfancyb(F2 *res1, F2 *res2, F2 a, F2 b) {
 
 F2 OVERLOAD mul_t4(F2 a)  { return U2(-a.y, a.x); } // i.e. a * i
 
-F2 OVERLOAD mul_t8(F2 a)  { // mul(a, U2(1, 1)) * (F)(M_SQRT1_2); }
+F2 OVERLOAD mul_t8(F2 a)  { // mul(a, U2(1, 1)) * (F)(M_SQRT1_2_F); }
   // One mul, two FMAs
-  F ay = a.y * (float) M_SQRT1_2;
-  return U2(fma(a.x, (float) M_SQRT1_2, -ay), fma(a.x, (float) M_SQRT1_2, ay));
+  F ay = a.y * (float) M_SQRT1_2_F;
+  return U2(fma(a.x, (float) M_SQRT1_2_F, -ay), fma(a.x, (float) M_SQRT1_2_F, ay));
 // Two adds, two muls
-//  return U2(a.x - a.y, a.x + a.y) * M_SQRT1_2;
+//  return U2(a.x - a.y, a.x + a.y) * M_SQRT1_2_F;
 }
 
-F2 OVERLOAD mul_3t8(F2 a) { // mul(a, U2(-1, 1)) * (F)(M_SQRT1_2); }
+F2 OVERLOAD mul_3t8(F2 a) { // mul(a, U2(-1, 1)) * (F)(M_SQRT1_2_F); }
   // One mul, two FMAs
-  F ay = a.y * (float) M_SQRT1_2;
-  return U2(fma(-a.x, (float) M_SQRT1_2, -ay), fma(a.x, (float) M_SQRT1_2, -ay));
+  F ay = a.y * (float) M_SQRT1_2_F;
+  return U2(fma(-a.x, (float) M_SQRT1_2_F, -ay), fma(a.x, (float) M_SQRT1_2_F, -ay));
 // Two adds, two muls
-//  return U2(-(a.x + a.y), a.x - a.y) * M_SQRT1_2;
+//  return U2(-(a.x + a.y), a.x - a.y) * M_SQRT1_2_F;
 }
 
 // Return a+b and a-b

@@ -12,6 +12,7 @@
 #include <unistd.h>
 #endif
 #include <filesystem>
+#include <stdexcept>
 #include <vector>
 #include <string>
 #include <optional>
@@ -41,21 +42,20 @@
 
 namespace fs = std::filesystem;
 
-struct CRCError {
+// File errors derive from std::exception so that the top-level handlers in main(), gpuWorker() and Background::run()
+// log them and carry on instead of letting them reach std::terminate.
+struct FileError : std::runtime_error {
   std::string name;
+  FileError(const char* kind, std::string n) : std::runtime_error(std::string(kind) + ": " + n), name(std::move(n)) {}
 };
-
-struct ReadError {
-  std::string name;
-};
-
-struct WriteError {
-  std::string name;
-};
+struct CRCError   : FileError { explicit CRCError(std::string n)   : FileError("CRC error", std::move(n)) {} };
+struct ReadError  : FileError { explicit ReadError(std::string n)  : FileError("read error", std::move(n)) {} };
+struct WriteError : FileError { explicit WriteError(std::string n) : FileError("write error", std::move(n)) {} };
 
 class File {
   FILE* f = nullptr;
   const bool readOnly;
+  bool unterminatedLastLineOK = false;
   
   File(const fs::path &path, const string& mode, bool throwOnError);
 
@@ -103,7 +103,7 @@ public:
 
   File(FILE* f, const string& name) : f{f}, readOnly{false}, name{name} {}
   
-  File(File&& other) : f{other.f}, readOnly{other.readOnly}, name{other.name} { other.f = nullptr; }
+  File(File&& other) : f{other.f}, readOnly{other.readOnly}, unterminatedLastLineOK{other.unterminatedLastLineOK}, name{other.name} { other.f = nullptr; }
   
   File& operator=(File&& other);
 
@@ -201,6 +201,10 @@ public:
 
   bool empty() { return size() == 0; }
 
+  // For hand-edited files that are never appended to (config.txt, tune.txt): accept a last line with no newline.
+  // worktodo files keep the check, as lines are appended to them and deleted by exact match (see deleteLine()).
+  void allowUnterminatedLastLine() { unterminatedLastLineOK = true; }
+
   // Returns newline-ended line.
   std::string readLine() {
     char buf[1024];
@@ -209,6 +213,7 @@ public:
     if (!ok) { return ""; }  // EOF or error
     string line = buf;
     if (line.empty() || line.back() != '\n') {
+      if (unterminatedLastLineOK && feof(this->get())) { return line + '\n'; }
       log("%s : line \"%s\" does not end with a newline\n", name.c_str(), line.c_str());
       throw ReadError{name};
     }

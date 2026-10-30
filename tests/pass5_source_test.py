@@ -12,7 +12,7 @@ class Guards(unittest.TestCase):
   self.assertLess(u.index('std::getenv("AEVUM_PRP_USE")'),u.index('TuneEntry::readTuneFile'))
   self.assertLess(u.index('TuneEntry::readTuneFile'),u.index('if(auto r=load(cache_key))'))
   self.assertIn('gain>=1.03',u);self.assertIn('worst>=0.985',u)
-  self.assertIn('if(reference!=value)throw std::runtime_error("WORD MISMATCH")',u)
+  self.assertIn('if(reference!=value)throw UseRejected("WORD MISMATCH")',u)
   # Slow OpenCL compilation may exceed the start budget, but a candidate that
   # already started must finish and checkpoint instead of being paid twice.
   self.assertIn('state.next_screen=index+1',u);self.assertIn('storeProgress(cache_key,state)',u)

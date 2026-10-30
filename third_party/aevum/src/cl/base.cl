@@ -75,7 +75,14 @@ G_H        "group height" == SMALL_HEIGHT / NH
 #define HAS_PTX 0
 #elif NVIDIAGPU
 #define HAS_ASM 0
+// CC is the GPU's compute capability as major * 100 + minor.  NVRTC's __CUDA_ARCH__ is what the code is compiled for, as
+// major * 100 + minor * 10.  They agree unless the CUDA shim fell back to an older compute_XY than the GPU because its
+// NVRTC lacks the GPU's sm_XY; then the PTX must be valid for that older target.
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ / 100 * 100 + __CUDA_ARCH__ % 100 / 10) < CC
+#define HAS_PTX (__CUDA_ARCH__ / 100 * 100 + __CUDA_ARCH__ % 100 / 10)
+#else
 #define HAS_PTX CC     // C code computed the nVidia GPU's compute capability
+#endif
 #else
 #define HAS_ASM 0
 #define HAS_PTX 0
@@ -89,6 +96,15 @@ G_H        "group height" == SMALL_HEIGHT / NH
 // On Nvidia we need the old sync between groups in carryFused
 #if !defined(OLD_FENCE) && !AMDGPU
 #define OLD_FENCE 1
+#endif
+
+// carryFused's !OLD_FENCE hand-off has one lane per wavefront publish (and one spin on) the ready flag for its whole
+// wavefront, with sync() as the only thing ordering the other lanes around it.  That needs a wavefront that runs in
+// lock-step (AMD) or a warp barrier (bar.warp.sync, NVIDIA with PTX).  Anywhere else sync() is empty and the hand-off
+// races, silently giving a wrong result (seen on an Intel iGPU).  The host already replaces an explicit OLD_FENCE=0 on
+// such devices; this is the backstop.
+#if !OLD_FENCE && !AMDGPU && !HAS_PTX
+#error "OLD_FENCE=0 needs an AMD GPU or NVIDIA PTX (a lock-step wavefront or a warp barrier); use OLD_FENCE=1"
 #endif
 
 // Keep the host allocation/sizing default and OpenCL layout specialization
@@ -848,20 +864,30 @@ void OVERLOAD bar(void) {
 // Create a barrier across a subset of threads OR across all threads if that is faster.
 // Again, the local memory fence is optional controlled by the FAST_BARRIER setting.
 void OVERLOAD bar(const u32 WG) {
-#if AMDGPU
-  // A group no larger than a wavefront skips the barrier, but unless FAST_BARRIER was asked for, keep the LDS fence.
+  // A group no larger than a wavefront can skip the barrier only where the hardware really runs a whole wavefront in
+  // lock-step.  AMD GCN/RDNA do, and so did NVIDIA before Volta.  Volta and later do not: Independent Thread Scheduling
+  // lets the lanes of a warp drift apart, and every caller exchanges data through LDS right afterwards, so the warp must
+  // be reconverged and its LDS traffic ordered -- sync() (bar.warp.sync) plus a local fence, a fraction of a barrier.
+  // Anything else (Intel, Apple, a CPU device under PoCL, NVIDIA without PTX) has no lock-step guarantee at all: it
+  // falls through to a real barrier, which every caller can take as it is what a larger WG gets.
   if (WG <= WAVEFRONT) {
+#if AMDGPU
+    // Unless FAST_BARRIER was asked for, keep the LDS fence.
     if (!FAST_BARRIER) mem_fence(CLK_LOCAL_MEM_FENCE);
     return;
-  }
+#elif HAS_PTX >= 600       // bar.warp.sync requires sm_60 or higher; ITS arrived with sm_70
+    sync();
+    mem_fence(CLK_LOCAL_MEM_FENCE);
+    return;
+#elif HAS_PTX >= 200
+    return;
 #endif
-  if (WG > WAVEFRONT) {
+  }
 #if ENABLE_BARSYNC && HAS_PTX >= 200         // bar.sync with thread count requires sm_20 support or higher.  Slower on TitanV, need to try on later nVidia GPUs.
-    __asm("bar.sync %0, %1;" : : "r"(get_local_id(0) / WG + 1), "n"(WG));
+  __asm("bar.sync %0, %1;" : : "r"(get_local_id(0) / WG + 1), "n"(WG));
 #else
-    bar();
+  bar();
 #endif
-  }
 }
 
 // Create a barrier across all threads.  Like bar(), primarily used to coordinate access to local memory.
@@ -889,9 +915,17 @@ void halfBar() {
 #if defined(__OPENCL_C_VERSION__) && __OPENCL_C_VERSION__ < 200
   // OpenCL C 1.2 has no get_enqueued_local_size().  PrMers/Aevum always
   // supplies an explicit local size, so get_local_size() is equivalent here.
-  if (get_local_size(0) / 2 > WAVEFRONT) { bar(); }
+  const u32 halfSize = get_local_size(0) / 2;
 #else
-  if (get_enqueued_local_size(0) / 2 > WAVEFRONT) { bar(); }
+  const u32 halfSize = get_enqueued_local_size(0) / 2;
+#endif
+  if (halfSize > WAVEFRONT) { bar(); return; }
+  // A half no larger than a wavefront: skip the barrier only where a wavefront runs in lock-step, as in bar(WG).
+#if HAS_PTX >= 600
+  sync();
+  mem_fence(CLK_LOCAL_MEM_FENCE);
+#elif !(AMDGPU || HAS_PTX >= 200)
+  bar();
 #endif
 }
 

@@ -1,5 +1,25 @@
 // Copyright (C) Mihai Preda
 
+// The inline-asm timing tests below differ between wave64 (GCN, CDNA) and wave32 (RDNA) code generation, and neither
+// variant assembles on the other's hardware.  The wavefront size is taken, in this order, from the compiler's wavefront
+// size macro (where the compiler defines one), from the host's query when that really is 32 or 64, and from the
+// compiler's architecture family macros (GFX9 is always wave64, GFX10 and later run wave32 here).  This is decided
+// before base.cl is included, because base.cl falls back to a guess (64 on AMD) when the host passed no WAVEFRONT, and
+// a guess must not pick the assembly.  0 means unknown, and the asm tests are then left out.
+#if defined(__AMDGCN_WAVEFRONT_SIZE__)
+#define SELFTEST_WAVEFRONT __AMDGCN_WAVEFRONT_SIZE__
+#elif defined(__AMDGCN_WAVEFRONT_SIZE)
+#define SELFTEST_WAVEFRONT __AMDGCN_WAVEFRONT_SIZE
+#elif defined(WAVEFRONT) && (WAVEFRONT == 32 || WAVEFRONT == 64)
+#define SELFTEST_WAVEFRONT WAVEFRONT
+#elif defined(__GFX9__)
+#define SELFTEST_WAVEFRONT 64
+#elif defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__)
+#define SELFTEST_WAVEFRONT 32
+#else
+#define SELFTEST_WAVEFRONT 0
+#endif
+
 #include "base.cl"
 #include "math.cl"
 #include "trig.cl"
@@ -21,17 +41,38 @@
 // Measure instruction latency.
 // The clock is read with __builtin_readcyclecounter(), which is s_memtime up to gfx10 and s_getreg SHADER_CYCLES on
 // gfx11+ (where s_memtime no longer exists). The waits keep an s_memtime read from overlapping the timed loop.
-// gfx10+ renamed v_add_i32 to v_add_nc_i32, and in wave32 the carry-out of v_mad_u64_u32 can't be the 64-bit vcc.
-#if AMDGPU && WAVEFRONT != 64
+// v_add_i32 is v_add_nc_i32 from gfx10 on, whatever the wavefront size (an RDNA part in wave64 mode too).  Without an
+// architecture macro, wave32 can only be RDNA, and wave64 is taken to be GCN.
+#if defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__)
+#define SELFTEST_GFX10_PLUS 1
+#elif defined(__GFX9__)
+#define SELFTEST_GFX10_PLUS 0
+#else
+#define SELFTEST_GFX10_PLUS (SELFTEST_WAVEFRONT == 32)
+#endif
+
+#if AMDGPU && SELFTEST_GFX10_PLUS
 #define ADD_I32 "v_add_nc_i32"
-#define MAD_CARRY "null"
 #else
 #define ADD_I32 "v_add_i32"
+#endif
+
+// The carry-out of v_mad_u64_u32 is the 64-bit vcc in wave64 and can't be in wave32.
+#if AMDGPU && SELFTEST_WAVEFRONT == 32
+#define MAD_CARRY "null"
+#else
 #define MAD_CARRY "vcc"
 #endif
 
+// Only with a known wavefront size is the choice above the right one.
+#if HAS_ASM && (SELFTEST_WAVEFRONT == 32 || SELFTEST_WAVEFRONT == 64)
+#define SELFTEST_ASM 1
+#else
+#define SELFTEST_ASM 0
+#endif
+
 KERNEL(32) testTime(int what, global i64* io) {
-#if HAS_ASM
+#if SELFTEST_ASM
   i64 clock0, clock1;
   
   if (what == 6) { // V_MAD_U64_U32
