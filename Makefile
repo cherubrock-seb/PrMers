@@ -829,6 +829,10 @@ test-ecm-resume-seed-factor: all
 .PHONY: test-checkpoint-length
 test-checkpoint-length: ; bash tests/checkpoint_length_test.sh
 
+.PHONY: test-ecm-cmont-construction-exit
+test-ecm-cmont-construction-exit: all
+	bash tests/ecm_cmont_construction_exit_test.sh $${PRMERS_TEST_DEVICE:-0}
+
 .PHONY: test-ecm-stage2-zero-z
 test-ecm-stage2-zero-z: ; python3 tests/ecm_stage2_zero_z_source_test.py
 
