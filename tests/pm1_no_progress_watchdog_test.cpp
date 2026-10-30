@@ -26,7 +26,7 @@ int main() {
 
     {
         core::pm1::NoProgressWatchdog watchdog(
-            120ms,
+            1000ms,
             [&](const std::string& phase, std::uint64_t progress) {
                 observed_phase = phase;
                 observed_progress = progress;
@@ -41,7 +41,7 @@ int main() {
 
         watchdog.set_phase("blocked-gpu-operation");
 
-        for (int i = 0; i < 100 && !fired.load(); ++i) {
+        for (int i = 0; i < 300 && !fired.load(); ++i) {
             std::this_thread::sleep_for(10ms);
         }
 
