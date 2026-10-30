@@ -835,6 +835,9 @@ test-ecm-cmont-construction-exit: all
 .PHONY: test-ecm-stage1-affine-factor
 test-ecm-stage1-affine-factor: all
 	bash tests/ecm_stage1_affine_factor_test.sh $${PRMERS_TEST_DEVICE:-0}
+.PHONY: test-ckpt-save-path
+test-ckpt-save-path: all
+	bash tests/ckpt_save_path_test.sh $${PRMERS_TEST_DEVICE:-0}
 
 .PHONY: test-ecm-stage2-zero-z
 test-ecm-stage2-zero-z: ; python3 tests/ecm_stage2_zero_z_source_test.py

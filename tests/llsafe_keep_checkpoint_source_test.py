@@ -14,7 +14,7 @@ def main():
     text = (ROOT / "src/modes/RunLlSafeMarin.cpp").read_text()
     start = text.index("int App::runLlSafeMarin()")
     body = text[start:]
-    calls = list(re.finditer(r"delete_checkpoints\s*\(", body))
+    calls = list(re.finditer(r"(?:delete_checkpoints|ckpt_loc\.removeAll)\s*\(", body))
     if not calls:
         print("FAIL: LL-SAFE no longer deletes its checkpoint at all")
         return 1

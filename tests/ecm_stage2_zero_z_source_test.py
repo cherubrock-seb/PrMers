@@ -26,8 +26,8 @@ def block_after(marker, text):
     raise AssertionError('unbalanced block after ' + marker)
 
 def check(body, what):
-    assert 'fs::remove(ckpt_file' in body and 'fs::remove(ckpt2' in body, what + ': checkpoints are not removed'
-    assert re.search(r'ckpt2 \+ "\.old"', body) and re.search(r'ckpt2 \+ "\.new"', body), what + ': .old/.new left behind'
+    assert ('fs::remove(ckpt_file' in body or 'ckpt1_loc.removeAll()' in body) and ('fs::remove(ckpt2' in body or 'ckpt2_loc.removeAll()' in body), what + ': checkpoints are not removed'
+    assert 'ckpt2_loc.removeAll()' in body or (re.search(r'ckpt2 \+ "\.old"', body) and re.search(r'ckpt2 \+ "\.new"', body)), what + ': .old/.new left behind'
     assert 'delete eng;' in body, what + ': engine is leaked'
 
 # chunk-boundary path: rz < 0 right after the Stage 2 gcd check
