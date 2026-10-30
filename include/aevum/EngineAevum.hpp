@@ -33,3 +33,7 @@ engine* create_aevum_engine(uint32_t exponent,
 // is not an Aevum engine or the plugin cannot report it.  This can differ from the plan the resolver predicted
 // before creation, because autotune, tune.txt replay and device profiles are applied when the engine is created.
 std::string aevum_engine_active_plan(const engine* eng);
+
+// "radix1k=<4|8> <source>" for the 1K radix the Aevum plugin uses on PrMers device `device` (see
+// aevum/Radix1kPolicy.hpp).  `cuda_plugin` is true when the CUDA plugin runs the engine, which is always NVIDIA.
+std::string aevum_radix1k_policy_detail(std::size_t device, bool cuda_plugin = false);

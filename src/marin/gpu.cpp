@@ -34,13 +34,6 @@ engine::gpu_backend backend = engine::gpu_backend::marin;
 engine::gpu_workload workload = engine::gpu_workload::generic;
 std::string aevum_fft_spec;
 
-std::string aevum_radix1k_policy_detail() {
-    const char* value = std::getenv("AEVUM_RADIX1K");
-    if (value && std::string(value) == "8")
-        return "radix1k=8 explicit-override";
-    return "radix1k=4 safe-default";
-}
-
 enum class BackendProbeMode { off, automatic, retune };
 
 BackendProbeMode backend_probe_mode() {
@@ -539,7 +532,7 @@ engine* engine::create_gpu(const uint32_t p, const size_t reg_count, const size_
                 measured_lowrange_prp_backend(p, reg_count, device, verbose);
             const std::string auto_detail =
                 decision.detail + " | " + measured.detail +
-                (measured.use_aevum ? " | " + aevum_radix1k_policy_detail() : "");
+                (measured.use_aevum ? " | " + aevum_radix1k_policy_detail(device) : "");
             std::cout << "[Backend Auto] " << aevum_workload_name(selected_workload)
                       << ": " << (measured.use_aevum ? "Aevum" : "Marin")
                       << " selected (" << auto_detail << ")." << std::endl;
@@ -549,7 +542,7 @@ engine* engine::create_gpu(const uint32_t p, const size_t reg_count, const size_
         }
 
         const std::string auto_detail = decision.use_aevum
-            ? decision.detail + " | " + aevum_radix1k_policy_detail()
+            ? decision.detail + " | " + aevum_radix1k_policy_detail(device)
             : decision.detail;
         std::cout << "[Backend Auto] " << aevum_workload_name(selected_workload) << ": "
                   << (decision.use_aevum ? "Aevum" : "Marin")
@@ -649,7 +642,7 @@ engine* engine::create_gpu(const uint32_t p, const size_t reg_count, const size_
                           << " (policy preview was " << decision.fft_spec << ")." << std::endl;
                 publish("Auto", "Aevum",
                         "created-FFT=" + active_plan + ", transform=" + std::to_string(created->get_size()) +
-                        " | policy preview: " + decision.detail + " | " + aevum_radix1k_policy_detail(),
+                        " | policy preview: " + decision.detail + " | " + aevum_radix1k_policy_detail(device),
                         created->get_size(), active_plan);
             }
         }
@@ -677,7 +670,7 @@ engine* engine::create_gpu(const uint32_t p, const size_t reg_count, const size_
         if (configured != gpu_backend::auto_select) {
             if (resolved_transform == 0 || !active_plan.empty()) resolved_transform = created->get_size();
             publish("Forced Aevum", "Aevum",
-                    "selected by -aevum | " + aevum_radix1k_policy_detail(),
+                    "selected by -aevum | " + aevum_radix1k_policy_detail(device),
                     resolved_transform, resolved_fft);
         }
         return created;

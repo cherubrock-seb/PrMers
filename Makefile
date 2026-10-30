@@ -509,6 +509,13 @@ test-aevum-device-map:
 	tests/build-aevum-device-map/aevum-device-map-test
 	rm -rf tests/build-aevum-device-map
 
+.PHONY: test-aevum-radix1k-policy
+test-aevum-radix1k-policy:
+	mkdir -p tests/build-aevum-radix1k-policy
+	$(CXX) -std=c++20 -O2 -Wall -Wextra -Iinclude tests/aevum_radix1k_policy_test.cpp -o tests/build-aevum-radix1k-policy/aevum-radix1k-policy-test
+	tests/build-aevum-radix1k-policy/aevum-radix1k-policy-test
+	rm -rf tests/build-aevum-radix1k-policy
+
 test-aevum-source:
 	python3 tests/aevum_lowrange_prp_safety_source_test.py
 	python3 tests/aevum_pow2_type4_source_test.py
