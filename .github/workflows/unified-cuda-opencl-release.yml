@@ -32,7 +32,7 @@ on:
 permissions:
   contents: read
 env:
-  TAG: v4.20.97-alpha-v100.49-aevum-v03110
+  TAG: v4.20.97-alpha-v100.50-wmul-strict
 jobs:
   linux:
     runs-on: ubuntu-24.04
@@ -176,7 +176,7 @@ jobs:
           sha256sum *.tar.gz *.zip > SHA256SUMS.txt
           test "$(wc -l < SHA256SUMS.txt)" -eq 5
           cat > NOTES.md <<'EOF'
-          PrMers v100.49: embeds exact standalone Aevum v0.3.110 after host, RTX 3080 and Radeon VII correctness and selector validation; retains the v100.48 correctness and reliability hardening and the unified CUDA/OpenCL auto-build and fail-closed selector behavior.
+          PrMers v100.50: adds strict explicit WMUL input validation in the vendored Aevum engine, rejecting zero, negative, malformed, partial and empty values while preserving valid explicit WMUL handling and the existing automatic/default policy. It retains the v100.49 Aevum v0.3.110 reconciliation, correctness gates and unified CUDA/OpenCL auto-build and fail-closed selector behavior.
 
           Aevum's existing per-workload FFT selector remains authoritative, including tune.txt and explicit FFT overrides. On NVIDIA, a bounded workload-aware probe verifies canonical residue agreement, selecting CUDA only if at least 3% faster. Missing CUDA/NVRTC, unsupported GPU mapping, errors and mismatches safely retain OpenCL.
 
@@ -190,5 +190,5 @@ jobs:
             echo "Refusing to overwrite already-published release $TAG" >&2
             exit 1
           fi
-          gh release create "$TAG" ./*.tar.gz ./*.zip ./SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "PrMers v100.49 Aevum v0.3.110 reconciliation" --notes-file NOTES.md
+          gh release create "$TAG" ./*.tar.gz ./*.zip ./SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "PrMers v100.50 strict WMUL input validation" --notes-file NOTES.md
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url,isPrerelease,assets
