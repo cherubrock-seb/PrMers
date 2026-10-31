@@ -609,7 +609,14 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 heightRad
       if (tailKernels == 3) tail_single_wide = 0, tail_single_kernel = 0;
     }
     if (k == "INPLACE") in_place = atoi(v.c_str());
-    if (k == "WMUL") wmul = atoi(v.c_str());
+    if (k == "WMUL") {
+      int parsedWmul = 0;
+      if (!parseStrictInt(v, parsedWmul) || parsedWmul < 1) {
+        log("Invalid WMUL='%s', must be an integer >= 1\n", v.c_str());
+        throw "invalid WMUL";
+      }
+      wmul = static_cast<u32>(parsedWmul);
+    }
     if (k == "PAD") {
       const int pad = atoi(v.c_str());
       if (pad < 0 || pad > AEVUM_MAX_PAD) {
