@@ -832,3 +832,18 @@ test-time-reentrant:
 test-host: test-main-exit-code
 test-main-exit-code: aevum
 	python3 tests/main_exit_code_test.py $(BIN)/aevum
+
+# Host regression for per-FFT config parsing. Link against the production engine
+# objects so Args::parse is exercised with its real dependencies.
+PER_FFT_CONFIG_PARSE_TEST := build-tests/aevum-per-fft-config-parse-test
+
+.PHONY: test-per-fft-config-parse
+test-host: test-per-fft-config-parse
+test-per-fft-config-parse: $(PER_FFT_CONFIG_PARSE_TEST)
+	$(PER_FFT_CONFIG_PARSE_TEST)
+
+$(PER_FFT_CONFIG_PARSE_TEST): tests/per_fft_config_parse_test.cpp $(ENGINE_OBJS)
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc \
+		tests/per_fft_config_parse_test.cpp $(ENGINE_OBJS) \
+		$(OPENCL_LIBS) $(DL_LIBS) -o $@

@@ -289,13 +289,47 @@ void Args::parse(const string& line) {
   if (line.empty() || line[0] == '#') { return; }
 
   if (line[0] == '!') {
-    // conditional defines predicated on a FFT
-    char fftBuf[32];
-    char configBuf[256];
-    sscanf(line.c_str(), "! %31s %255s", fftBuf, configBuf);
-    string fft = fftBuf;
-    string config = configBuf;
-    perFftConfig[fft] = splitUses(config);
+    // Conditional defines predicated on an FFT: "! <fft> <use-flags> [# comment]".
+    // Per-FFT flags use the same KEY=VALUE tokens as -use, but config lines may
+    // separate those tokens with commas, whitespace, or both.
+    std::istringstream iss{line.substr(1, line.find('#') - 1)};
+    string fft;
+    iss >> fft;
+
+    string flags;
+    std::getline(iss, flags);
+    std::replace(flags.begin(), flags.end(), ',', ' ');
+
+    vector<KeyVal> uses;
+    std::istringstream flagStream{flags};
+    string token;
+    while (flagStream >> token) {
+      vector<KeyVal> const parsed = splitUses(token);
+      uses.insert(uses.end(), parsed.begin(), parsed.end());
+    }
+
+    if (fft.empty() || uses.empty()) {
+      log("config line ignored (expected \"! <fft> <use-flags>\"): \"%s\"\n", line.c_str());
+      return;
+    }
+
+    // clDefines() looks up per-FFT flags by fft.shape.spec(), so normalize all
+    // accepted full FFT spellings to that same canonical key.
+    string key;
+    try {
+      if (std::count(fft.begin(), fft.end(), ':') < 2) { throw "not a FFT shape"; }
+      key = FFTConfig{fft}.shape.spec();
+    } catch (const char*) {
+      log("config line ignored (\"%s\" is not a FFT shape such as 1K:13:256): \"%s\"\n", fft.c_str(), line.c_str());
+      return;
+    }
+
+    // Repeated lines accumulate. A later value replaces only the matching key.
+    vector<KeyVal>& conf = perFftConfig[key];
+    for (const KeyVal& kv : uses) {
+      std::erase_if(conf, [&kv](const KeyVal& e) { return e.first == kv.first; });
+      conf.push_back(kv);
+    }
     return;
   }
 
