@@ -4,9 +4,13 @@
 // more than an Intel UHD's maximum workgroup size of 256, so the first launch failed with INVALID_WORK_GROUP_SIZE.
 
 #include "WmulLimit.h"
+#include "StrictInt.h"
 
 #include <cstdint>
 #include <cstdio>
+#include <fstream>
+#include <sstream>
+#include <string>
 
 using namespace wmul_limit;
 
@@ -19,12 +23,79 @@ static void expect(const char* what, uint32_t got, uint32_t want) {
   }
 }
 
+static void expectBool(const char* what, bool got, bool want) {
+  if (got != want) {
+    std::printf("FAIL %s: got %d, want %d\n", what, int(got), int(want));
+    ++failures;
+  }
+}
+
+// Match Gpu.cpp's explicit -use WMUL policy without involving any OpenCL
+// device: syntax must be a complete decimal integer and the requested value
+// must be at least one.  clampWmul() remains defensive for internal callers.
+static bool parseExplicitWmul(const std::string& text, uint32_t& value) {
+  int parsed = 0;
+  if (!parseStrictInt(text, parsed) || parsed < 1) return false;
+  value = static_cast<uint32_t>(parsed);
+  return true;
+}
+
+static void expectGpuParserWiring() {
+  std::ifstream input("src/Gpu.cpp");
+  if (!input) {
+    std::printf("FAIL cannot read src/Gpu.cpp for WMUL parser source contract\n");
+    ++failures;
+    return;
+  }
+
+  std::ostringstream buffer;
+  buffer << input.rdbuf();
+  const std::string source = buffer.str();
+
+  const char* required[] = {
+      "if (k == \"WMUL\") {",
+      "parseStrictInt(v, parsedWmul)",
+      "parsedWmul < 1",
+      "Invalid WMUL='%s', must be an integer >= 1",
+      "wmul = static_cast<u32>(parsedWmul);",
+  };
+
+  for (const char* token : required) {
+    if (source.find(token) == std::string::npos) {
+      std::printf("FAIL Gpu.cpp WMUL parser missing source contract token: %s\n", token);
+      ++failures;
+    }
+  }
+
+  if (source.find("if (k == \"WMUL\") wmul = atoi(v.c_str());") != std::string::npos) {
+    std::printf("FAIL Gpu.cpp still uses atoi for WMUL\n");
+    ++failures;
+  }
+}
+
 // Effective WMUL for a plan on a device, as clDefines computes it.
 static uint32_t effective(uint32_t requested, uint32_t width, uint32_t nW, uint32_t bigHeight, uint32_t shufl, uint64_t localMem, uint32_t maxWg) {
   return clampWmul(requested, maxWmul(width, nW, shufl, localMem, maxWg), bigHeight);
 }
 
 int main() {
+  // Explicit -use WMUL is configuration input, not the automatic/default
+  // policy.  Refuse values that atoi() used to silently reinterpret.
+  {
+    uint32_t parsed = 99;
+    expectBool("explicit wmul 0 rejected", parseExplicitWmul("0", parsed), false);
+    expectBool("explicit wmul negative rejected", parseExplicitWmul("-1", parsed), false);
+    expectBool("explicit wmul garbage rejected", parseExplicitWmul("garbage", parsed), false);
+    expectBool("explicit wmul partial rejected", parseExplicitWmul("3x", parsed), false);
+    expectBool("explicit wmul empty rejected", parseExplicitWmul("", parsed), false);
+    expectBool("explicit wmul 1 accepted", parseExplicitWmul("1", parsed), true);
+    expect("explicit wmul 1 value", parsed, 1);
+    expectBool("explicit wmul 4 accepted", parseExplicitWmul("4", parsed), true);
+    expect("explicit wmul 4 value", parsed, 4);
+  }
+
+  expectGpuParserWiring();
+
   // The default is unchanged where it fits.  AMD: 1024 threads, 64KB local memory.  NVIDIA: 1024 threads, 48KB.
   expect("amd 512 wmul2",   effective(2, 512,  4, 4096, 8, 65536, 1024), 2);
   expect("amd 1K wmul2",    effective(2, 1024, 8, 2048, 8, 65536, 1024), 2);
