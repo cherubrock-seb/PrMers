@@ -37,14 +37,14 @@ def verify_version(version, tag, binary_output=None):
 
 
 def self_test():
-    verify_version("4.20.97-alpha-v100.49-aevum-v03110",
-                   "v4.20.97-alpha-v100.49-aevum-v03110",
-                   "prmers Release v4.20.97-alpha-v100.49-aevum-v03110\n")
+    verify_version("4.20.97-alpha-v100.50-wmul-strict",
+                   "v4.20.97-alpha-v100.50-wmul-strict",
+                   "prmers Release v4.20.97-alpha-v100.50-wmul-strict\n")
     cases = [
-        ("4.20.97-alpha-v100.48-correctness-hardening", "v4.20.97-alpha-v100.49-aevum-v03110", None),
-        ("4.20.97-alpha-v100.49-aevum-v03110", "v4.20.97-alpha-v100.48-correctness-hardening", None),
-        ("4.20.97-alpha-v100.49-aevum-v03110",
-         "v4.20.97-alpha-v100.49-aevum-v03110", "prmers Release v4.20.97-alpha-v100.48-correctness-hardening"),
+        ("4.20.97-alpha-v100.49-aevum-v03110", "v4.20.97-alpha-v100.50-wmul-strict", None),
+        ("4.20.97-alpha-v100.50-wmul-strict", "v4.20.97-alpha-v100.49-aevum-v03110", None),
+        ("4.20.97-alpha-v100.50-wmul-strict",
+         "v4.20.97-alpha-v100.50-wmul-strict", "prmers Release 4.20.97-alpha-v100.49-aevum-v03110"),
     ]
     for version, tag, output in cases:
         try:
