@@ -244,6 +244,7 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	python3 tests/apple_canonical_set_u32_test.py
 	bash tests/source_audit.sh
 	python3 tests/gpu_init_order_test.py
+	python3 tests/platform_device_selector_source_test.py
 	python3 tests/readroe_clears_mulroepos_test.py
 	python3 tests/tail_kernels_range_source_test.py
 	python3 tests/engine_autotune_isolation_test.py

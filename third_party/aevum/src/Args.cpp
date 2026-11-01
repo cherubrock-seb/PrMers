@@ -230,10 +230,11 @@ named "config.txt" in the Aevum run directory.
                          maxexp=<val> - Time FFTs to find the best one for exponents less than <val>.
                          quick=<val> - Higher values equals a quicker, potentially less accurate tune.  Val ranges from 1 to 10.
 -device <N>        : select the GPU at position N in the list of devices
+-device <P>:<D>    : select GPU D of OpenCL platform P (GPUs counted per platform)
 -uid    <UID>      : select the GPU with the given UID (on ROCm/AMDGPU, Linux)
 -pci    <BDF>      : select the GPU with the given PCI BDF, e.g. "0c:00.0"
 
-Device selection : use one of -uid <UID>, -pci <BDF>, -device <N>, see the list below
+Device selection : use one of -uid <UID>, -pci <BDF>, -device <N>, -device <P>:<D>, see the list below
 
 )", ProofSet::diskUsageGB(120000000, 10), nSavefiles);
 
@@ -438,9 +439,40 @@ void Args::parse(const string& line) {
     else if (key == "-fft") { fftSpec = s; }
     else if (key == "-dump") { dump = s; }
     else if (key == "-user") { user = s; }
-    else if (key == "-device" || key == "-d") { device = stoi(s); }
-    else if (key == "-uid") { device = getPosFromUid(s); }
-    else if (key == "-pci") { device = getPosFromBdf(s); }
+    else if (key == "-device" || key == "-d") {
+      auto const colon = s.find(':');
+      if (colon == string::npos) {
+        device = stoi(s);
+        platformDevicePlatform = -1;
+        platformDeviceIndex = -1;
+      } else {
+        int platform = -1;
+        int platformDevice = -1;
+        bool const oneColon = s.find(':', colon + 1) == string::npos;
+        bool const valid =
+          oneColon &&
+          colon > 0 &&
+          colon + 1 < s.size() &&
+          parseStrictInt(s.substr(0, colon), platform) &&
+          parseStrictInt(s.substr(colon + 1), platformDevice);
+        if (!valid) {
+          log("-device expects <N> or <platform>:<device>, got '%s'\n", s.c_str());
+          throw "-device syntax";
+        }
+        platformDevicePlatform = platform;
+        platformDeviceIndex = platformDevice;
+      }
+    }
+    else if (key == "-uid") {
+      device = getPosFromUid(s);
+      platformDevicePlatform = -1;
+      platformDeviceIndex = -1;
+    }
+    else if (key == "-pci") {
+      device = getPosFromBdf(s);
+      platformDevicePlatform = -1;
+      platformDeviceIndex = -1;
+    }
     else if (key == "-dir") { dir = s; }
     else if (key == "-carry") {
       if (s == "short" || s == "long") {
@@ -481,6 +513,10 @@ void Args::parse(const string& line) {
 }
 
 void Args::setDefaults() {
+  if (platformDevicePlatform >= 0) {
+    device = getPosFromPlatformDevice(platformDevicePlatform, platformDeviceIndex);
+    if (device < 0) { throw "-device: no such platform:device"; }
+  }
   uid = getUidFromPos(device);
   log("device %d, OpenCL %s, unique id '%s'\n", device, getDriverVersionByPos(device).c_str(), uid.c_str());
   
