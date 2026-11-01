@@ -59,6 +59,8 @@ public:
   std::map<std::string, vector<KeyVal>> perFftConfig;
 
   int device = 0;
+  int platformDevicePlatform = -1;
+  int platformDeviceIndex = -1;
 
   bool safeMath = true;
   bool clean = true;
