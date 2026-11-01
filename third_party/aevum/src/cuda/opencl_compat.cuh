@@ -128,6 +128,7 @@ __device__ __forceinline__ float2 operator*(float s, float2 a) { return make_flo
 __device__ __forceinline__ float2 operator*(float2 a, float s) { return make_float2(a.x*s, a.y*s); }
 __device__ __forceinline__ float2& operator+=(float2& a, float2 b) { a.x+=b.x; a.y+=b.y; return a; }
 __device__ __forceinline__ float2& operator-=(float2& a, float2 b) { a.x-=b.x; a.y-=b.y; return a; }
+__device__ __forceinline__ float2& operator*=(float2& a, float s) { a.x*=s; a.y*=s; return a; }
 
 // int2
 __device__ __forceinline__ int2 operator+(int2 a, int2 b) { return make_int2(a.x+b.x, a.y+b.y); }

@@ -1314,6 +1314,15 @@ public:
     args_.setDefaults();
     args_.profile = std::getenv("AEVUM_PROFILE_KERNELS") && std::strcmp(std::getenv("AEVUM_PROFILE_KERNELS"), "1") == 0;
     timing_enabled_ = envExactly("AEVUM_TIMING_DECOMP", "1");
+    if (const char* value = std::getenv("AEVUM_REG_SCALE3")) {
+      if (std::strcmp(value, "0") && std::strcmp(value, "1"))
+        throw std::runtime_error("AEVUM_REG_SCALE3 must be 0 or 1");
+      scale3_enabled_ = std::strcmp(value, "1") == 0;
+    }
+#if defined(__APPLE__)
+    if (scale3_enabled_)
+      throw std::runtime_error("AEVUM_REG_SCALE3 is not supported on Apple");
+#endif
 
     // Device-scoped tuning must use the actual OpenCL device selected by -d.
     cl_device_id selected_device = getDevice(device);
@@ -2520,6 +2529,13 @@ private:
           std::to_string(small_factor_headroom_bits_));
     }
 
+    // Preserve the capacity check above and the existing canonical boundary.
+    // This scales balanced digits; it deliberately does not use carryM.
+    if (scale3_enabled_ && factor == 3) {
+      gpu_->regScale3(reg(index));
+      return;
+    }
+
     if (small_factor_scratch_.empty()) throw std::runtime_error("Aevum small-factor scratch is unavailable");
 
     gpu_->regCopy(small_factor_scratch_[0], reg(index));
@@ -2581,6 +2597,7 @@ private:
   bool pending_lead_width_ = false;
   double small_factor_headroom_bits_ = 0.0;
   bool timing_enabled_ = false;
+  bool scale3_enabled_ = false;
   aevum_engine_timing_stats timing_{};
 };
 

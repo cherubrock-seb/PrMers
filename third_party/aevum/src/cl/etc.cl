@@ -45,6 +45,18 @@ KERNEL(256) regAdd(P(Word) dst, CP(Word) src) {
 }
 #endif
 
+#if REGTRIPLE
+// Same balanced-digit result as the small-factor addition chain for factor 3.
+// The caller keeps its existing FFT headroom check. The two additions have
+// the same signed range requirements as the original regAdd sequence.
+KERNEL(256) regTriple(P(Word) dst) {
+  for (u32 p = get_global_id(0); p < NWORDS; p += get_global_size(0)) {
+    Word x = dst[p];
+    dst[p] = x + (x + x);
+  }
+}
+#endif
+
 #if REGSUB
 KERNEL(256) regSub(P(Word) dst, CP(Word) src) {
   for (u32 p = get_global_id(0); p < NWORDS; p += get_global_size(0)) dst[p] -= src[p];

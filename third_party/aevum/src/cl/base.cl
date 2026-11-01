@@ -942,7 +942,7 @@ void dependentLaunch() {
 
 void dependentLaunchWait() {
 #if CUDA_BACKEND && HAS_PTX >= 900 && ENABLE_PDL
-  __asm volatile("griddepcontrol.wait;");                 // same as cudaGridDependencySynchronize();
+  __asm volatile("griddepcontrol.wait;" ::: "memory");     // same as cudaGridDependencySynchronize();
 #endif
 }
 
