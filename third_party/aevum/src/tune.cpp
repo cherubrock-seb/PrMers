@@ -11,6 +11,8 @@
 #include "TuneEntry.h"
 
 #include <algorithm>
+#include <cmath>
+#include <map>
 #include <numeric>
 #include <string>
 #include <vector>
@@ -338,6 +340,54 @@ void configsUpdate(double current_cost, double best_cost, double threshold, cons
     suggestedConfigKeyVals.push_back({key, value});
 }
 
+// The greedy -tune sweeps keep small winners in args->flags so later sweeps see
+// them, but config.txt contains only winners that cleared their individual
+// thresholds.  That final combination has therefore never been timed as a
+// whole.  Compare it with the flags the tune started with in A/B/B/A order so
+// clock drift mostly cancels.  Save the new combination only if it is at least
+// minGain faster, otherwise keep it as a commented suggestion and restore the
+// flags a restart would use.
+static void confirmNewSettings(u64 exponent, GpuCommon shared, FFTConfig fft, int quick,
+                               const map<string, string>& originalFlags,
+                               vector<pair<string,int>>& newConfigKeyVals,
+                               vector<pair<string,int>>& suggestedConfigKeyVals,
+                               double minGain = 0.001) {
+  Args *args = shared.args;
+  if (newConfigKeyVals.empty()) return;
+
+  auto writtenFlags = originalFlags;
+  for (auto const& [key, value] : newConfigKeyVals) {
+    writtenFlags[key] = to_string(value);
+  }
+
+  auto timeWith = [&](const map<string, string>& flags) {
+    args->flags = flags;
+    return Gpu::make(exponent, shared, fft, {}, false)->timePRP(std::min(quick, 3));
+  };
+
+  double const a1 = timeWith(originalFlags);
+  double const b1 = timeWith(writtenFlags);
+  double const b2 = timeWith(writtenFlags);
+  double const a2 = timeWith(originalFlags);
+  double const before = (a1 + a2) / 2;
+  double const after = (b1 + b2) / 2;
+  bool const faster = std::isfinite(after) &&
+                      (!std::isfinite(before) || after < (1.0 - minGain) * before);
+
+  log("Time for %12s with the settings -tune started with is %6.1f (%.1f, %.1f), with the new settings %6.1f (%.1f, %.1f)\n",
+      fft.spec().c_str(), before, a1, a2, after, b1, b2);
+
+  if (faster) {
+    args->flags = writtenFlags;
+    return;
+  }
+
+  log("The new settings are not faster than the settings -tune started with.  They are not saved to config.txt.\n");
+  suggestedConfigKeyVals.insert(suggestedConfigKeyVals.begin(), newConfigKeyVals.begin(), newConfigKeyVals.end());
+  newConfigKeyVals.clear();
+  args->flags = originalFlags;
+}
+
 void Tune::tune() {
   Args *args = shared.args;
   vector<FFTShape> shapes = FFTShape::multiSpec(args->fftSpec);
@@ -379,6 +429,7 @@ void Tune::tune() {
   if (tune_config) {
     vector<pair<string,int>> newConfigKeyVals;
     vector<pair<string,int>> suggestedConfigKeyVals;
+    auto const originalFlags = args->flags;
 
     // Select/init the default FFTshape(s) and FFTConfig(s) for optimal -use options testing
     FFTShape defaultFFTShape, defaultNTTShape, *defaultShape;
@@ -1114,6 +1165,13 @@ void Tune::tune() {
       log("Best BIGLIT is %u.  Default BIGLIT is 1.  The BIGLIT=0 option will probably be deprecated.\n", best_biglit);
       configsUpdate(current_cost, best_cost, 0.003, "BIGLIT", best_biglit, newConfigKeyVals, suggestedConfigKeyVals);
       args->flags["BIGLIT"] = to_string(best_biglit);
+    }
+
+    // Confirm the exact combination that will be written, not only its greedy component wins.
+    {
+      FFTConfig const fft{*defaultShape, variant, CARRY_AUTO};
+      confirmNewSettings(primes.prevPrime(fft.maxExp()), shared, fft, quick, originalFlags,
+                         newConfigKeyVals, suggestedConfigKeyVals);
     }
 
     // Output new settings to config.txt
