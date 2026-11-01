@@ -10,6 +10,9 @@
 #include "File.h"
 #include "TuneEntry.h"
 
+#include <algorithm>
+#include <cmath>
+#include <map>
 #include <numeric>
 #include <string>
 #include <vector>
@@ -337,6 +340,54 @@ void configsUpdate(double current_cost, double best_cost, double threshold, cons
     suggestedConfigKeyVals.push_back({key, value});
 }
 
+// The greedy -tune sweeps keep small winners in args->flags so later sweeps see
+// them, but config.txt contains only winners that cleared their individual
+// thresholds.  That final combination has therefore never been timed as a
+// whole.  Compare it with the flags the tune started with in A/B/B/A order so
+// clock drift mostly cancels.  Save the new combination only if it is at least
+// minGain faster, otherwise keep it as a commented suggestion and restore the
+// flags a restart would use.
+static void confirmNewSettings(u64 exponent, GpuCommon shared, FFTConfig fft, int quick,
+                               const map<string, string>& originalFlags,
+                               vector<pair<string,int>>& newConfigKeyVals,
+                               vector<pair<string,int>>& suggestedConfigKeyVals,
+                               double minGain = 0.001) {
+  Args *args = shared.args;
+  if (newConfigKeyVals.empty()) return;
+
+  auto writtenFlags = originalFlags;
+  for (auto const& [key, value] : newConfigKeyVals) {
+    writtenFlags[key] = to_string(value);
+  }
+
+  auto timeWith = [&](const map<string, string>& flags) {
+    args->flags = flags;
+    return Gpu::make(exponent, shared, fft, {}, false)->timePRP(std::min(quick, 3));
+  };
+
+  double const a1 = timeWith(originalFlags);
+  double const b1 = timeWith(writtenFlags);
+  double const b2 = timeWith(writtenFlags);
+  double const a2 = timeWith(originalFlags);
+  double const before = (a1 + a2) / 2;
+  double const after = (b1 + b2) / 2;
+  bool const faster = std::isfinite(after) &&
+                      (!std::isfinite(before) || after < (1.0 - minGain) * before);
+
+  log("Time for %12s with the settings -tune started with is %6.1f (%.1f, %.1f), with the new settings %6.1f (%.1f, %.1f)\n",
+      fft.spec().c_str(), before, a1, a2, after, b1, b2);
+
+  if (faster) {
+    args->flags = writtenFlags;
+    return;
+  }
+
+  log("The new settings are not faster than the settings -tune started with.  They are not saved to config.txt.\n");
+  suggestedConfigKeyVals.insert(suggestedConfigKeyVals.begin(), newConfigKeyVals.begin(), newConfigKeyVals.end());
+  newConfigKeyVals.clear();
+  args->flags = originalFlags;
+}
+
 void Tune::tune() {
   Args *args = shared.args;
   vector<FFTShape> shapes = FFTShape::multiSpec(args->fftSpec);
@@ -378,6 +429,7 @@ void Tune::tune() {
   if (tune_config) {
     vector<pair<string,int>> newConfigKeyVals;
     vector<pair<string,int>> suggestedConfigKeyVals;
+    auto const originalFlags = args->flags;
 
     // Select/init the default FFTshape(s) and FFTConfig(s) for optimal -use options testing
     FFTShape defaultFFTShape, defaultNTTShape, *defaultShape;
@@ -409,12 +461,42 @@ void Tune::tune() {
     else {
       log("Checking whether this GPU is better suited for double-precision FFTs or integer NTTs.\n");
       defaultFFTShape = FFTShape(FFT64, 512, 16, 512);
-      FFTConfig fft{defaultFFTShape, 101, CARRY_32};
-      double fp64_time = Gpu::make(141000001, shared, fft, {}, false)->timePRP(quick);
-      log("Time for FP64 FFT %12s is %6.1f\n", fft.spec().c_str(), fp64_time);
       defaultNTTShape = FFTShape(FFT3161, 512, 8, 512);
+      FFTConfig fft{defaultFFTShape, 101, CARRY_32};
       FFTConfig ntt{defaultNTTShape, 202, CARRY_AUTO};
-      double ntt_time = Gpu::make(141000001, shared, ntt, {}, false)->timePRP(quick);
+      u64 probe_exponent = 141000001;
+
+      // If the requested exponent window excludes the historical 141M probe,
+      // compare the families where the user actually asked us to tune.  Use
+      // the smallest favored shapes that safely cover the midpoint so cache
+      // footprint and launch overhead reflect that range.  The default shapes
+      // used for the later option sweeps remain unchanged.
+      if (probe_exponent < min_exponent || probe_exponent > max_exponent) {
+        probe_exponent = primes.prevPrime(min_exponent / 2 + max_exponent / 2);
+        auto smallest = [&](enum FFT_TYPES type, u32 variant, FFTConfig current) {
+          // allShapes() intentionally enumerates only FFT3161 in Aevum.
+          // multiSpec with an explicit type prefix reaches the shared
+          // type-specific shape enumerator without changing global AUTO.
+          vector<FFTShape> sizes =
+              FFTShape::multiSpec(to_string((u32) type) + ":256K-128M");
+          for (const FFTShape& shape : sizes) {
+            if (!shape.isFavoredShape()) continue;
+            FFTConfig candidate{shape, variant, CARRY_AUTO};
+            const double bpw = probe_exponent / double(candidate.size());
+            if (bpw >= candidate.minBpw() &&
+                candidate.maxExp() >= probe_exponent) return candidate;
+          }
+          return current;
+        };
+
+        fft = smallest(FFT64, 101, fft);
+        ntt = smallest(FFT3161, 202, ntt);
+        log("Timing family choice at %" PRIu64 ", the middle of the requested exponent range.\n", probe_exponent);
+      }
+
+      double fp64_time = Gpu::make(probe_exponent, shared, fft, {}, false)->timePRP(quick);
+      log("Time for FP64 FFT %12s is %6.1f\n", fft.spec().c_str(), fp64_time);
+      double ntt_time = Gpu::make(probe_exponent, shared, ntt, {}, false)->timePRP(quick);
       log("Time for M31*M61 NTT %12s is %6.1f\n", ntt.spec().c_str(), ntt_time);
       if (fp64_time < ntt_time) {
         defaultShape = &defaultFFTShape;
@@ -1083,6 +1165,13 @@ void Tune::tune() {
       log("Best BIGLIT is %u.  Default BIGLIT is 1.  The BIGLIT=0 option will probably be deprecated.\n", best_biglit);
       configsUpdate(current_cost, best_cost, 0.003, "BIGLIT", best_biglit, newConfigKeyVals, suggestedConfigKeyVals);
       args->flags["BIGLIT"] = to_string(best_biglit);
+    }
+
+    // Confirm the exact combination that will be written, not only its greedy component wins.
+    {
+      FFTConfig const fft{*defaultShape, variant, CARRY_AUTO};
+      confirmNewSettings(primes.prevPrime(fft.maxExp()), shared, fft, quick, originalFlags,
+                         newConfigKeyVals, suggestedConfigKeyVals);
     }
 
     // Output new settings to config.txt

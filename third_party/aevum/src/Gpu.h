@@ -288,6 +288,7 @@ private:
   Kernel kernIsEqual;
   Kernel sum64;
   Kernel regAdd;
+  Kernel regTriple;
   Kernel regSub;
   Kernel regSubValue;
 
@@ -491,6 +492,7 @@ public:
   void regMulPrepared(Buffer<Word>& dst, Buffer<double>& prepared, u32 factor = 1);
   void regMul(Buffer<Word>& dst, Buffer<Word>& src, u32 factor = 1);
   void regAddWords(Buffer<Word>& dst, const Buffer<Word>& src);
+  void regScale3(Buffer<Word>& dst);
   void regSubWords(Buffer<Word>& dst, const Buffer<Word>& src);
   void regSetU32(Buffer<Word>& dst, u32 value);
   void regSubU32(Buffer<Word>& dst, u32 value);
