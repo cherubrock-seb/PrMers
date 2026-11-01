@@ -37,14 +37,17 @@ def verify_version(version, tag, binary_output=None):
 
 
 def self_test():
-    verify_version("4.20.97-alpha-v100.50-wmul-strict",
-                   "v4.20.97-alpha-v100.50-wmul-strict",
-                   "prmers Release v4.20.97-alpha-v100.50-wmul-strict\n")
+    verify_version("4.20.97-alpha-v100.51-aevum-v03111",
+                   "v4.20.97-alpha-v100.51-aevum-v03111",
+                   "prmers Release v4.20.97-alpha-v100.51-aevum-v03111\n")
     cases = [
-        ("4.20.97-alpha-v100.49-aevum-v03110", "v4.20.97-alpha-v100.50-wmul-strict", None),
-        ("4.20.97-alpha-v100.50-wmul-strict", "v4.20.97-alpha-v100.49-aevum-v03110", None),
         ("4.20.97-alpha-v100.50-wmul-strict",
-         "v4.20.97-alpha-v100.50-wmul-strict", "prmers Release 4.20.97-alpha-v100.49-aevum-v03110"),
+         "v4.20.97-alpha-v100.51-aevum-v03111", None),
+        ("4.20.97-alpha-v100.51-aevum-v03111",
+         "v4.20.97-alpha-v100.50-wmul-strict", None),
+        ("4.20.97-alpha-v100.51-aevum-v03111",
+         "v4.20.97-alpha-v100.51-aevum-v03111",
+         "prmers Release v4.20.97-alpha-v100.50-wmul-strict"),
     ]
     for version, tag, output in cases:
         try:
@@ -52,7 +55,7 @@ def self_test():
         except ValueError:
             continue
         raise AssertionError("Negative release-identity regression did not fail")
-    # These parsers require only source contents.  They do not invoke git.
+    # These parsers require only source contents. They do not invoke git.
     assert source_version('const std::string PRMERS_VERSION = "1.2.3";') == "1.2.3"
     assert release_tag("env:\n  TAG: v1.2.3\n") == "v1.2.3"
 
