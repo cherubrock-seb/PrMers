@@ -33,7 +33,7 @@ neighbors around the validated ~197M selector boundary.
 
 Use `-bench2-out PATH`.
 
-Bench2 writes a versioned `bench2.v1` schema as:
+Bench2 writes a versioned `bench2.v2` schema as:
 
 - `bench2.txt`
 - `bench2.json`
@@ -183,3 +183,42 @@ driver, runtime, build, or benchmark configuration.
 
 Bench3 is a benchmark and classifier only. It does not rewrite production tune
 files or selector policy.
+
+## Warm Gerbicz timing (Bench2/Bench3 v2)
+
+Both benchmarks execute one complete, exact Gerbicz probe before collecting
+three identical fresh-state probes. The first probe exercises prepared
+multiplication, the boundary, replay, readback and comparison, but contributes
+no timing samples. Every probe resets the registers and must pass the same
+exactness check; a failure during warmup also invalidates the result.
+
+The production estimate uses the median of the three paired estimates.
+Boundary and full-check values belong to that same median sample, not
+independently selected components. JSON/CSV report `production_timing_method`,
+`production_probe_repetitions`, boundary/full-check min/max and
+`production_prp_us_per_iter_min/max`. Large warm-sample ranges still require a
+longer, counterbalanced rerun; this method does not establish clock, power or
+thermal stability.
+
+This addresses a source-level bias: square-only warmup did not exercise the
+first Gerbicz prepared multiply/readback, whose single timing could include
+lazy compilation or first-use allocation. It is a plausible explanation for
+inconsistent production estimates on adjacent exponents using the same FFT,
+not proof of the cause of any particular hardware report.
+
+New completed records and Bench3 partial plans live under
+`records/warm-gerbicz-v1/` and `partial/warm-gerbicz-v1/`.
+Old measurements remain on disk but are not resumed or aggregated into the v2
+outputs. Bench3 uses checkpoint format `bench3.plan.v2`.
+The three-probe method is fixed across modes; the existing square warmup and
+repetition counts, production algorithms, selectors and tune files are unchanged.
+
+Validation pending: run `make test-production-probe test-bench2-source
+test-bench3-source`, build, then verify v1-cache exclusion, v2 resume,
+interruption and failures during each probe. On real GPUs compare adjacent
+196999969/197000003 exponents with actual backend/plan recorded, then legal
+PFA3/PFA7 plans including M136279841. Keep cold and warm runs separate, record
+driver/power/clock settings, and require exact full residues. Bench estimates
+remain a screen: any optimization needs at least three counterbalanced A/B
+pairs of full PRP timings and at least 3% repeatable end-to-end improvement.
+No compilation, host tests, GPU tests or benchmarks were executed for this change.

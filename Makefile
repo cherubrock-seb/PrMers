@@ -567,6 +567,13 @@ test-pm1-stage1-ckpt: all
 test-pm1-nk-stage2-b2: all
 	bash tests/pm1_nk_stage2_with_b2_test.sh $${PRMERS_TEST_DEVICE:-0}
 
+.PHONY: test-pm1-aevum-base3
+# Pure host arithmetic and eligibility regression; no OpenCL device is required.
+test-pm1-aevum-base3:
+	@tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	$(CXX) -std=c++20 -Iinclude -Wall -Wextra -Werror tests/pm1_aevum_base3_test.cpp -o "$$tmp/pm1_aevum_base3_test" && \
+	"$$tmp/pm1_aevum_base3_test"
+
 test-pm1-stage1-checklevel: all
 	bash tests/pm1_stage1_checklevel_test.sh $${PRMERS_TEST_DEVICE:-0}
 
@@ -691,9 +698,9 @@ test-error-check-retry:
 .PHONY: test-llsafe-norm-square
 # Pure host arithmetic regression; no OpenCL device is required.
 test-llsafe-norm-square:
-	@tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
-	$(CXX) -std=c++20 -Iinclude -Wall -Wextra -Werror tests/llsafe_norm_square_test.cpp -o "$$tmp/llsafe_norm_square_test" && \
-	"$$tmp/llsafe_norm_square_test"
+	@tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT; \
+	$(CXX) -std=c++20 -Iinclude -Wall -Wextra -Werror tests/llsafe_norm_square_test.cpp -o "$tmp/llsafe_norm_square_test" && \
+	"$tmp/llsafe_norm_square_test"
 
 .PHONY: test-llsafe-error-recovery
 test-llsafe-error-recovery: all
@@ -967,3 +974,10 @@ test-pm1-pfactor-vtrace-resume:
 # monitored stall, and requires exit 124 with byte-identical checkpoint state.
 test-pm1-vtrace-watchdog-timeout: all
 	bash tests/pm1_vtrace_watchdog_timeout_test.sh ${PRMERS_TEST_DEVICE:-0}
+
+.PHONY: test-production-probe
+# Host-only sampling regression; does not create a GPU context.
+test-production-probe:
+	@tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	$(CXX) -std=c++20 -Iinclude -Wall -Wextra -Werror tests/production_probe_test.cpp -o "$$tmp/production_probe_test" && \
+	"$$tmp/production_probe_test"
