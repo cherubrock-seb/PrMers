@@ -1292,6 +1292,37 @@ u32 Gpu::dataElements() const {
   return u32(middleDataElements(WIDTH, fft.shape.middle, SMALL_H, in_place, int(pad_size), in_wg, in_sizex, out_wg, out_sizex));
 }
 
+static string tailGF61KernelDefines(const Args& args,
+                                    cl_device_id deviceId,
+                                    const FFTConfig& fft,
+                                    const vector<KeyVal>& extraConf,
+                                    string defines) {
+  bool explicit_shufl_bytes_h = false;
+  for (const auto& [key, value] : extraConf)
+    if (key == "SHUFL_BYTES_H") { explicit_shufl_bytes_h = true; break; }
+
+  if (!explicit_shufl_bytes_h)
+    explicit_shufl_bytes_h = args.flags.find("SHUFL_BYTES_H") != args.flags.end();
+
+  if (!explicit_shufl_bytes_h) {
+    if (auto it = args.perFftConfig.find(fft.shape.spec()); it != args.perFftConfig.end())
+      for (const auto& [key, value] : it->second)
+        if (key == "SHUFL_BYTES_H") { explicit_shufl_bytes_h = true; break; }
+  }
+
+  // The validated H512 LDS path is gfx906-specific, not AMD-vendor-wide.
+  // Other AMD families retain the canonical reverse path until independently
+  // validated; explicit SHUFL_BYTES_H always takes precedence.
+  if (!explicit_shufl_bytes_h && isAmdGpu(deviceId) &&
+      fft.isPfa() && fft.NTT_GF61 && fft.shape.height == 512) {
+    const string name = getDeviceName(deviceId);
+    if (name == "gfx906" || name.rfind("gfx906:", 0) == 0)
+      defines += " -DTAIL_GF61_REVERSE16=1";
+  }
+
+  return defines;
+}
+
 Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, bool logFftSize) :
   shared(s),
   background{shared.background},
@@ -1364,7 +1395,10 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
                                                !tail_single_wide && !tail_single_kernel ? hN / nH - SMALL_H / nH * 2 : // Double-wide tailSquare with two kernels
                                                !tail_single_wide ? hN / nH :                                           // Double-wide tailSquare with one kernel
                                                !tail_single_kernel ? hN / nH / 2 - SMALL_H / nH * (fft.isPfa() ? fft.pfa_radix : 1) : // Single-wide, two kernels
-                                               hN / nH / 2, (kernelDefines(K61) + numCudaRegisters(TAIL61)).c_str()),  // Single-wide tailSquare with one kernel
+                                               hN / nH / 2,
+                                               (tailGF61KernelDefines(args, shared.context->deviceId(), fft,
+                                                                     extraConf, kernelDefines(K61)) +
+                                                numCudaRegisters(TAIL61)).c_str()),  // Single-wide tailSquare with one kernel
 #endif
 #if defined(__APPLE__)
   K(ktailMulGF61,          "tailmul.cl", "tailMulGF61ApplePlaceholder", hN / nH / 2, kernelDefines(K61).c_str()),
