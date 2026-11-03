@@ -39,7 +39,7 @@ assert "core::bench3::run(options)" in app
 assert "if (!o.gaussian_mersenne && !o.bench && !o.bench2 && !o.bench3)" in app
 assert "!hasWorktodoEntry_ && o.exponent == 0 &&\n        !o.bench && !o.bench2 && !o.bench3" in app
 assert "!options.bench && !options.bench2 && !options.bench3 && options.filemers.empty()" in app
-assert "bench3.v1" in bench
+assert "bench3.v2" in bench
 assert "pow2:auto" in bench
 assert "pfa:auto" in bench
 assert "pfa:3" in bench
@@ -64,7 +64,7 @@ assert '"setup_begin"' in bench
 assert '"exact_begin"' in bench
 assert '"warmup_begin"' in bench
 assert '"production_probe_begin"' in bench
-assert "bench3.plan.v1" in bench
+assert "bench3.plan.v2" in bench
 assert "const DeviceInfo info = device_info(device_index);" in bench
 assert "info.vendor" in bench
 assert "info.name" in bench
@@ -100,4 +100,12 @@ assert "point-status.txt" in bench
 assert 'row.status == "TIMEOUT" || row.status == "ERROR"' in bench
 assert "int run(const io::CliOptions& options);" in bench_h
 assert "## `-bench3`" in docs
+# Cold-probe records must not enter warm-probe rankings or resume results.
+assert 'core::bench::sample_production_probe' in bench
+assert 'out_dir / "records" / core::bench::kProductionTimingMethod' in bench
+assert 'production_probe_repetitions' in bench
+assert 'production_prp_us_per_iter_min' in bench
+assert 'production_prp_us_per_iter_max' in bench
+assert 'out_dir / "partial" / core::bench::kProductionTimingMethod' in bench
+
 print("bench3 source regression: PASS")

@@ -1,4 +1,5 @@
 #include "core/Bench2.hpp"
+#include "core/ProductionProbe.hpp"
 
 #include "aevum/EngineAevum.hpp"
 #include "core/Version.hpp"
@@ -34,7 +35,7 @@
 namespace core::bench2 {
 namespace {
 
-constexpr const char* kSchemaVersion = "bench2.v1";
+constexpr const char* kSchemaVersion = "bench2.v2";
 constexpr std::size_t kPrpRegisterCount = 8;
 
 volatile std::sig_atomic_t g_stop = 0;
@@ -80,6 +81,7 @@ struct Record {
     double transform_mwords = 0.0;
     double bpw = 0.0;
 
+    core::bench::ProductionProbeStats production_stats;
     double setup_ms = 0.0;
     double us_median = 0.0;
     double us_min = 0.0;
@@ -373,8 +375,10 @@ ProductionPrpTiming measure_production_prp_timing(
 
     const std::uint64_t modB =
         exponent % out.block == 0 ? out.block : exponent % out.block;
-    for (std::uint64_t z = 0; z < modB; ++z)
+    for (std::uint64_t z = 0; z < modB; ++z) {
+        if (g_stop) throw std::runtime_error("bench2 interrupted");
         eng.square_mul(R0);
+    }
     eng.sync();
 
     const auto boundary_begin = std::chrono::steady_clock::now();
@@ -392,16 +396,20 @@ ProductionPrpTiming measure_production_prp_timing(
 
     const std::uint64_t loop_count =
         out.block > modB ? out.block - modB - 1 : 0;
-    for (std::uint64_t z = 0; z < loop_count; ++z)
+    for (std::uint64_t z = 0; z < loop_count; ++z) {
+        if (g_stop) throw std::runtime_error("bench2 interrupted");
         eng.square_mul(R3);
+    }
 
     if (exponent % out.block == 0)
         eng.mul(R3, RTMP);
     else
         eng.square_mul(R3, 3u);
 
-    for (std::uint64_t z = 0; z < modB; ++z)
+    for (std::uint64_t z = 0; z < modB; ++z) {
+        if (g_stop) throw std::runtime_error("bench2 interrupted");
         eng.square_mul(R3);
+    }
 
     mpz_t z0, z1;
     mpz_inits(z0, z1, nullptr);
@@ -458,6 +466,7 @@ std::string csv_header() {
         "timed_iterations_per_rep,repetitions,us_per_iter_median,"
         "us_per_iter_min,us_per_iter_max,dispersion_pct,iterations_per_second,"
         "estimated_full_prp_seconds,register_bytes,checkpoint_bytes,"
+        "production_timing_method,production_probe_repetitions,gerbicz_boundary_us_min,gerbicz_boundary_us_max,gerbicz_full_check_us_min,gerbicz_full_check_us_max,production_prp_us_per_iter_min,production_prp_us_per_iter_max,"
         "gerbicz_block,gerbicz_checkpasslevel,gerbicz_full_check_interval,"
         "gerbicz_boundary_us,gerbicz_full_check_us,"
         "gerbicz_amortized_us_per_iter,production_prp_us_per_iter,"
@@ -529,6 +538,14 @@ std::string record_json(const Record& r, const ModeConfig& cfg) {
       << "\"estimated_full_prp_seconds\":" << r.estimated_full_prp_seconds << ","
       << "\"register_bytes\":" << r.register_bytes << ","
       << "\"checkpoint_bytes\":" << r.checkpoint_bytes << ","
+      << "\"production_timing_method\":\"" << core::bench::kProductionTimingMethod << "\","
+      << "\"production_probe_repetitions\":" << r.production_stats.repetitions << ","
+      << "\"gerbicz_boundary_us_min\":" << r.production_stats.boundary_min_us << ","
+      << "\"gerbicz_boundary_us_max\":" << r.production_stats.boundary_max_us << ","
+      << "\"gerbicz_full_check_us_min\":" << r.production_stats.full_check_min_us << ","
+      << "\"gerbicz_full_check_us_max\":" << r.production_stats.full_check_max_us << ","
+      << "\"production_prp_us_per_iter_min\":" << r.production_stats.production_min_us << ","
+      << "\"production_prp_us_per_iter_max\":" << r.production_stats.production_max_us << ","
       << "\"gerbicz_block\":" << r.gerbicz_block << ","
       << "\"gerbicz_checkpasslevel\":" << r.gerbicz_checkpasslevel << ","
       << "\"gerbicz_full_check_interval\":" << r.gerbicz_full_check_interval << ","
@@ -602,6 +619,14 @@ std::string record_csv(const Record& r, const ModeConfig& cfg) {
       << r.estimated_full_prp_seconds << ','
       << r.register_bytes << ','
       << r.checkpoint_bytes << ','
+      << core::bench::kProductionTimingMethod << ','
+      << r.production_stats.repetitions << ','
+      << r.production_stats.boundary_min_us << ','
+      << r.production_stats.boundary_max_us << ','
+      << r.production_stats.full_check_min_us << ','
+      << r.production_stats.full_check_max_us << ','
+      << r.production_stats.production_min_us << ','
+      << r.production_stats.production_max_us << ','
       << r.gerbicz_block << ','
       << r.gerbicz_checkpasslevel << ','
       << r.gerbicz_full_check_interval << ','
@@ -875,9 +900,15 @@ Record benchmark_point(const std::uint32_t exponent,
                 r.us_median * static_cast<double>(exponent) / 1'000'000.0;
         }
 
-        const ProductionPrpTiming production =
-            measure_production_prp_timing(
-                *eng, exponent, r.us_median);
+        const auto probes = core::bench::sample_production_probe([&](std::size_t trial) {
+            if (g_stop) throw std::runtime_error("bench2 interrupted");
+            std::cout << "BENCH2_PRODUCTION_PROBE p=" << exponent
+                      << " trial=" << trial << " warmup=" << (trial == 0)
+                      << std::endl;
+            return measure_production_prp_timing(*eng, exponent, r.us_median);
+        });
+        const ProductionPrpTiming& production = probes.median;
+        r.production_stats = probes.stats;
 
         r.gerbicz_block = production.block;
         r.gerbicz_checkpasslevel = production.checkpasslevel;
@@ -925,7 +956,7 @@ int run(const io::CliOptions& options) {
             ? std::filesystem::path("bench2-results")
             : std::filesystem::path(options.bench2_output);
 
-    const std::filesystem::path record_dir = out_dir / "records";
+    const std::filesystem::path record_dir = out_dir / "records" / core::bench::kProductionTimingMethod;
 
     if (!options.bench2_resume) {
         std::error_code ec;

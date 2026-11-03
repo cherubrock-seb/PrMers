@@ -36,7 +36,7 @@ assert "aevum_engine_active_plan" in aevum_h
 
 # Required tranche-A output / resume contract.
 for token in (
-    'kSchemaVersion = "bench2.v1"',
+    'kSchemaVersion = "bench2.v2"',
     '"quick"',
     '"standard"',
     '"dense"',
@@ -114,5 +114,12 @@ for p in (
     assert p in bench, p
 
 assert "static engine * create_gpu" in engine_h
+
+# Cold-probe records must not enter warm-probe rankings or resume results.
+assert 'core::bench::sample_production_probe' in bench
+assert 'out_dir / "records" / core::bench::kProductionTimingMethod' in bench
+assert 'production_probe_repetitions' in bench
+assert 'production_prp_us_per_iter_min' in bench
+assert 'production_prp_us_per_iter_max' in bench
 
 print("bench2 source regression: PASS")
