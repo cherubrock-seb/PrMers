@@ -8,6 +8,7 @@
 #include "core/ProofSet.hpp"
 #include "core/ProofSetMarin.hpp"
 #include "math/Carry.hpp"
+#include "math/Pm1Base3.hpp"
 #include "util/GmpUtils.hpp"
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
@@ -6729,6 +6730,8 @@ static mpz_class buildE_incremental_fast(uint64_t B1_old, uint64_t B1_new)
 
 
 int App::runPM1Marin() {
+    const bool request_aevum_base3 = prmers::pm1::parse_aevum_base3_flag(
+        std::getenv("PRMERS_PM1_AEVUM_BASE3"));
    // v56: fail fast on invalid default V-trace options before spending time in Stage 1.
    // Normal-memory P-1 Stage 2 uses V-trace by default. Stage 2 V-trace
    // requires even D so odd primes q can be represented as q = kD ± j with
@@ -7138,7 +7141,7 @@ int App::runPM1Marin() {
     }
 
     const bool aevum_backend = eng->is_aevum_backend();
-    if (aevum_backend && !pm1_ultralowmem_stage1) {
+    if (aevum_backend && !pm1_ultralowmem_stage1 && !request_aevum_base3) {
         std::cout << "[PM1] Aevum uses the generic square plus base-3 multiply path; fast3 is disabled.\n";
         if (guiServer_) guiServer_->appendLog("[PM1] Aevum uses the generic square plus base-3 multiply path; fast3 is disabled.\n");
     }
@@ -8108,6 +8111,9 @@ int App::runPM1Marin() {
             }
             if (firstChunk) Echunk *= mpz_class(2) * mpz_from_u64(options.exponent);
             bool useFast3 = useFast3Candidate && (nextStart == 0) && !aevum_backend;
+            // Keep useFast3 unchanged for the general Aevum checker below.
+            bool useAevumBase3 = prmers::pm1::aevum_base3_candidate(
+                request_aevum_base3, aevum_backend, firstChunk, nextStart);
             if (pm1_ultralowmem_stage1 && !useFast3) {
                 throw std::runtime_error("-pm1-ultralowmem requires the fast3 single-chunk path; use a smaller B1 or a larger -maxebits value, or use -pm1-lowmem");
             }
@@ -8197,6 +8203,21 @@ int App::runPM1Marin() {
                     eng->set(RSTATE, 1);
                 }
             }
+            if (useAevumBase3) {
+                useAevumBase3 = prmers::pm1::check_base3(*eng, RBASE, RTMP);
+                const char* message = useAevumBase3
+                    ? "[PM1 base3] Experimental Aevum square-and-scale enabled; general checker retained."
+                    : "[PM1 base3] Restored base is not 3; using general prepared multiplication.";
+                std::cout << message << std::endl;
+                if (guiServer_) guiServer_->appendLog(message);
+            }
+            auto disable_aevum_base3 = [&]() {
+                if (!useAevumBase3) return;
+                useAevumBase3 = false;
+                const char* message = "[PM1 base3] Verification failed; using general prepared multiplication for recovery.";
+                std::cout << message << std::endl;
+                if (guiServer_) guiServer_->appendLog(message);
+            };
             for (mp_bitcnt_t i = (mp_bitcnt_t)resumeI; i > 0; --i) {
                 lastIter = i;
                 if (interrupted) {
@@ -8239,7 +8260,8 @@ int App::runPM1Marin() {
                     }
                 }
                 int b = mpz_tstbit(Echunk.get_mpz_t(), i - 1) ? 1 : 0;
-                if (useFast3) { if (b) eng->square_mul(RSTATE, 3); else eng->square_mul(RSTATE); }
+                if (useAevumBase3) prmers::pm1::base3_bit(*eng, RSTATE, b != 0);
+                else if (useFast3) { if (b) eng->square_mul(RSTATE, 3); else eng->square_mul(RSTATE); }
                 else {
                     if (pm1_ultralowmem_stage1) throw std::runtime_error("internal error: ultra-low-memory entered non-fast3 path");
                     eng->square_mul(RSTATE); if (b) { eng->set_multiplicand(RTMP, RBASE); eng->mul(RSTATE, RTMP); }
@@ -8282,6 +8304,7 @@ int App::runPM1Marin() {
                             eng->set_multiplicand(RTMP, RPOW);
                             eng->mul(RCHK, RTMP);
                             const bool ok = eng->is_equal(RCHK, RACC_R);
+                            if (!ok) disable_aevum_base3();
                             if (!ok) { std::cout << "[Gerbicz Li] Mismatch : Last correct state will be restored\n"; if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Mismatch : Last correct state will be restored\n"; guiServer_->appendLog(oss.str()); } options.gerbicz_error_count += 1; eng->copy(RSTATE, RSAVE_S); eng->set(RACC_L, 1); eng->set(RACC_R, 1); eng->copy(RSTART, RSTATE); i = (mp_bitcnt_t)(i + blocks_since_check * B); eacc = 0; blocks_since_check = 0; wbits = 0; gl_checkpass = 0; bits_in_block = 0; continue; }
                             else { std::cout << "[Gerbicz Li] Check passed\n"; if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Check passed\n"; guiServer_->appendLog(oss.str()); } eng->copy(RSAVE_S, RSTATE); eng->set(RACC_L, 1); eng->set(RACC_R, 1); eacc = 0; blocks_since_check = 0; gl_checkpass = 0; }
                         }
@@ -8298,6 +8321,7 @@ int App::runPM1Marin() {
                             eng->set_multiplicand(RTMP, RPOW);
                             eng->mul(RCHK, RTMP);
                             const bool ok0 = eng->is_equal(RCHK, RSTATE);
+                            if (!ok0) disable_aevum_base3();
                             if (!ok0) { std::cout << "[Gerbicz Li] Mismatch : Last correct state will be restored\n"; if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Mismatch : Last correct state will be restored\n"; guiServer_->appendLog(oss.str()); } options.gerbicz_error_count += 1; eng->copy(RSTATE, RSTART); i = (mp_bitcnt_t)(i + current_block_len); wbits = 0; bits_in_block = 0; continue; }
                             else { std::cout << "[Gerbicz Li] Check passed\n"; if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Check passed\n"; guiServer_->appendLog(oss.str()); } eng->copy(RSAVE_S, RSTATE); eng->set(RACC_L, 1); eng->set(RACC_R, 1); eacc = 0; blocks_since_check = 0; gl_checkpass = 0; }
                         }
@@ -8342,6 +8366,7 @@ int App::runPM1Marin() {
                 eng->set_multiplicand(RTMP, RPOW);
                 eng->mul(RCHK, RTMP);
                 const bool ok_tail = eng->is_equal(RCHK, RSTATE);
+                if (!ok_tail) disable_aevum_base3();
                 if (!ok_tail) { eng->copy(RSTATE, RSTART); eng->copy(RCHK, RSTART); for (uint64_t k = 0; k < bt; ++k) eng->square_mul(RCHK); eng->set(RPOW, 1); size_t wbl2 = mpz_sizeinbase(wtail.get_mpz_t(), 2); for (size_t k = wbl2; k-- > 0;) { if (useFast3) { if (mpz_tstbit(wtail.get_mpz_t(), k)) eng->square_mul(RPOW, 3); else eng->square_mul(RPOW); } else { eng->square_mul(RPOW); if (mpz_tstbit(wtail.get_mpz_t(), k)) { eng->set_multiplicand(RTMP, RBASE); eng->mul(RPOW, RTMP); } } } eng->set_multiplicand(RTMP, RPOW); eng->mul(RSTATE, RTMP); }
                 bits_in_block = 0;
                 wbits = 0;

@@ -333,6 +333,21 @@ u128 OVERLOAD mul64(u64 a, u64 b) {
 #endif
 }
 
+// Specialized full-width product for operands satisfying a + b < 2^64.
+// Under that bound the middle partial-product sum cannot overflow u64,
+// allowing AMD code generation to keep it in one accumulator.
+u128 OVERLOAD mul64s(u64 a, u64 b) {
+#if HAS_PTX
+  return mul64(a, b);
+#else
+  u32 al = (u32) a, ah = (u32) (a >> 32), bl = (u32) b, bh = (u32) (b >> 32);
+  u64 ll = (u64) al * bl;
+  u64 mid = (u64) ah * bl + ((u64) al * bh + (ll >> 32));
+  u64 hh = (u64) ah * bh + (mid >> 32);
+  return make_u128(hh, (mid << 32) | (u32) ll);
+#endif
+}
+
 u128 OVERLOAD mad64(u64 a, u64 b, u64 c) {
 #if ENABLE_MAD64 && HAS_PTX >= 200        // mad instruction requires sm_20 support or higher    // Slower on TitanV and mobile 4070, don't understand why
   u64 reslo, reshi;
@@ -389,6 +404,22 @@ u128 OVERLOAD mad64(u64 a, u64 b, u128 c) {
   return make_u128((u64)as_ulong(rhi2), (u64)as_ulong(rlo2));
 #else
   return add(mul64(a, b), c);
+#endif
+}
+
+// mad64 variants for the same bounded product operands as mul64s.
+u128 OVERLOAD mad64s(u64 a, u64 b, u64 c) {
+#if HAS_PTX
+  return mad64(a, b, c);
+#else
+  return add(mul64s(a, b), make_u128(0, c));
+#endif
+}
+u128 OVERLOAD mad64s(u64 a, u64 b, u128 c) {
+#if HAS_PTX
+  return mad64(a, b, c);
+#else
+  return add(mul64s(a, b), c);
 #endif
 }
 
@@ -1174,7 +1205,7 @@ u64 OVERLOAD weakModM61(u128 a, u32 num_bits) {
 // If n <= 6 result will be at most (n+1)*M61+epsilon.
 // If n > 6 result will be at most 2*M61+epsilon.
 Z61 OVERLOAD weakMul(Z61 a, Z61 b, const u32 a_m61_count, const u32 b_m61_count) {
-  u128 ab = mul64(a, b);                                // Max value is (a_m61_count - 1) * (b_m61_count - 1) * M61^2 + epsilon
+  u128 ab = (a_m61_count + b_m61_count <= 9) ? mul64s(a, b) : mul64(a, b);  // The count bound also guarantees a + b < 2^64
   if ((a_m61_count - 1) * (b_m61_count - 1) <= 6) {
     return weakModM61(ab, 125);                         // Max value is ((a_m61_count - 1) * (b_m61_count - 1) + 1) * M61 + epsilon
   } else {
@@ -1182,7 +1213,7 @@ Z61 OVERLOAD weakMul(Z61 a, Z61 b, const u32 a_m61_count, const u32 b_m61_count)
   }
 }
 Z61 OVERLOAD weakMulAdd(Z61 a, Z61 b, u64 c, const u32 a_m61_count, const u32 b_m61_count) {
-  u128 ab = mad64(a, b, c);                             // Max value is (a_m61_count - 1) * (b_m61_count - 1) * M61^2 + epsilon
+  u128 ab = (a_m61_count + b_m61_count <= 9) ? mad64s(a, b, c) : mad64(a, b, c);  // The count bound also guarantees a + b < 2^64
   if ((a_m61_count - 1) * (b_m61_count - 1) <= 6) {
     return weakModM61(ab, 125);                         // Max value is ((a_m61_count - 1) * (b_m61_count - 1) + 1) * M61 + epsilon
   } else {
@@ -1190,7 +1221,7 @@ Z61 OVERLOAD weakMulAdd(Z61 a, Z61 b, u64 c, const u32 a_m61_count, const u32 b_
   }
 }
 Z61 OVERLOAD weakMulAdd(Z61 a, Z61 b, u128 c, const u32 a_m61_count, const u32 b_m61_count) {  // Max c value assumed to be 2*M61^2+epsilon
-  u128 ab = mad64(a, b, c);                             // Max value is ((a_m61_count - 1) * (b_m61_count - 1) + 2) * M61^2 + epsilon
+  u128 ab = (a_m61_count + b_m61_count <= 9) ? mad64s(a, b, c) : mad64(a, b, c);  // c does not change the bounded product operands
   if ((a_m61_count - 1) * (b_m61_count - 1) + 2 <= 6) {
     return weakModM61(ab, 125);                         // Max value is ((a_m61_count - 1) * (b_m61_count - 1) + 3) * M61 + epsilon
   } else {
@@ -1252,7 +1283,7 @@ GF61 OVERLOAD cmul(GF61 a, GF61 b) {
 }
 #elif !defined(AEVUM_GF61_CMUL_ALT) || !AEVUM_GF61_CMUL_ALT
 GF61 OVERLOAD cmul(GF61 a, GF61 b) {
-  u128 k1 = mul64(b.x, a.x + a.y);                            // max value is 2*M61^2+epsilon
+  u128 k1 = mul64s(b.x, a.x + a.y);                           // Reduced operands satisfy the bounded-product precondition
   Z61 k1k2 = weakMulAdd(a.x, b.y + neg(b.x, 2), k1, 2, 4);    // max value is 6*M61+epsilon
   Z61 k1k3 = weakMulAdd(a.y, neg(b.y + b.x, 3), k1, 2, 4);    // max value is 6*M61+epsilon
   return U2(modM61(k1k3), modM61(k1k2));
