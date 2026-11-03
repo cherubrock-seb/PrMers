@@ -967,3 +967,10 @@ test-pm1-pfactor-vtrace-resume:
 # monitored stall, and requires exit 124 with byte-identical checkpoint state.
 test-pm1-vtrace-watchdog-timeout: all
 	bash tests/pm1_vtrace_watchdog_timeout_test.sh ${PRMERS_TEST_DEVICE:-0}
+
+.PHONY: test-production-probe
+# Host-only sampling regression; does not create a GPU context.
+test-production-probe:
+	@tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	$(CXX) -std=c++20 -Iinclude -Wall -Wextra -Werror tests/production_probe_test.cpp -o "$$tmp/production_probe_test" && \
+	"$$tmp/production_probe_test"

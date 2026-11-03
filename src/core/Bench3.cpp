@@ -1,4 +1,5 @@
 #include "core/Bench3.hpp"
+#include "core/ProductionProbe.hpp"
 
 #include "aevum/EngineAevum.hpp"
 #include "core/Version.hpp"
@@ -52,8 +53,8 @@ extern char** environ;
 namespace core::bench3 {
 namespace {
 
-constexpr const char* kSchemaVersion = "bench3.v1";
-constexpr const char* kPlanCheckpointVersion = "bench3.plan.v1";
+constexpr const char* kSchemaVersion = "bench3.v2";
+constexpr const char* kPlanCheckpointVersion = "bench3.plan.v2";
 constexpr std::size_t kPrpRegisterCount = 8;
 // Keep one exponent where the validated fixed PFA7 plan is legal, so every
 // Bench3 mode actually measures PFA7 instead of only reporting it as illegal.
@@ -112,6 +113,7 @@ struct PlanResult {
     std::size_t transform_words = 0;
     double transform_mwords = 0.0;
     double bpw = 0.0;
+    core::bench::ProductionProbeStats production_stats;
     double setup_ms = 0.0;
     double us_median = 0.0;
     double us_min = 0.0;
@@ -323,7 +325,10 @@ ProductionTiming production_timing(engine& eng,
     eng.set_multiplicand(RTMP, RBASE);
 
     const std::uint64_t modB = exponent % out.block == 0 ? out.block : exponent % out.block;
-    for (std::uint64_t z = 0; z < modB; ++z) eng.square_mul(R0);
+    for (std::uint64_t z = 0; z < modB; ++z) {
+        if (g_stop) throw std::runtime_error("bench3 interrupted");
+        eng.square_mul(R0);
+    }
     eng.sync();
 
     const auto boundary_begin = std::chrono::steady_clock::now();
@@ -338,12 +343,18 @@ ProductionTiming production_timing(engine& eng,
 
     const auto full_begin = std::chrono::steady_clock::now();
     const std::uint64_t loop_count = out.block > modB ? out.block - modB - 1 : 0;
-    for (std::uint64_t z = 0; z < loop_count; ++z) eng.square_mul(R3);
+    for (std::uint64_t z = 0; z < loop_count; ++z) {
+        if (g_stop) throw std::runtime_error("bench3 interrupted");
+        eng.square_mul(R3);
+    }
 
     if (exponent % out.block == 0) eng.mul(R3, RTMP);
     else eng.square_mul(R3, 3u);
 
-    for (std::uint64_t z = 0; z < modB; ++z) eng.square_mul(R3);
+    for (std::uint64_t z = 0; z < modB; ++z) {
+        if (g_stop) throw std::runtime_error("bench3 interrupted");
+        eng.square_mul(R3);
+    }
 
     mpz_t z0, z1;
     mpz_inits(z0, z1, nullptr);
@@ -481,8 +492,14 @@ PlanResult measure_plan(std::uint32_t exponent,
         r.us_max = *std::max_element(samples.begin(), samples.end());
 
         progress("production_probe_begin");
-        const ProductionTiming prod =
-            production_timing(*eng, exponent, r.us_median);
+        const auto probes = core::bench::sample_production_probe([&](std::size_t trial) {
+            if (g_stop) throw std::runtime_error("bench3 interrupted");
+            progress(trial == 0 ? "production_probe_warmup" :
+                     "production_probe_rep_" + std::to_string(trial));
+            return production_timing(*eng, exponent, r.us_median);
+        });
+        const ProductionTiming& prod = probes.median;
+        r.production_stats = probes.stats;
         r.production_probe_exact = prod.exact;
         r.production_us_per_iter = prod.production_us_per_iter;
         progress("production_probe_done");
@@ -625,7 +642,14 @@ void atomic_write_plan_checkpoint(const std::filesystem::path& path,
             << std::setprecision(17)
             << r.transform_mwords << ' ' << r.bpw << ' ' << r.setup_ms << ' '
             << r.us_median << ' ' << r.us_min << ' ' << r.us_max << ' '
-            << r.production_us_per_iter << '\n';
+            << r.production_us_per_iter << '\n'
+            << r.production_stats.repetitions << ' '
+            << r.production_stats.boundary_min_us << ' '
+            << r.production_stats.boundary_max_us << ' '
+            << r.production_stats.full_check_min_us << ' '
+            << r.production_stats.full_check_max_us << ' '
+            << r.production_stats.production_min_us << ' '
+            << r.production_stats.production_max_us << '\n';
         out.flush();
         if (!out) throw std::runtime_error("cannot flush Bench3 plan checkpoint");
     }
@@ -673,7 +697,14 @@ bool read_plan_checkpoint(const std::filesystem::path& path,
              >> loaded.us_median
              >> loaded.us_min
              >> loaded.us_max
-             >> loaded.production_us_per_iter))
+             >> loaded.production_us_per_iter
+             >> loaded.production_stats.repetitions
+             >> loaded.production_stats.boundary_min_us
+             >> loaded.production_stats.boundary_max_us
+             >> loaded.production_stats.full_check_min_us
+             >> loaded.production_stats.full_check_max_us
+             >> loaded.production_stats.production_min_us
+             >> loaded.production_stats.production_max_us))
         return false;
 
     if (loaded.status == "ERROR" || loaded.status == "TIMEOUT")
@@ -1285,6 +1316,14 @@ std::string row_json(const PlanResult& r) {
       << "\"us_per_iter_median\":" << r.us_median << ","
       << "\"us_per_iter_min\":" << r.us_min << ","
       << "\"us_per_iter_max\":" << r.us_max << ","
+      << "\"production_timing_method\":\"" << core::bench::kProductionTimingMethod << "\","
+      << "\"production_probe_repetitions\":" << r.production_stats.repetitions << ","
+      << "\"gerbicz_boundary_us_min\":" << r.production_stats.boundary_min_us << ","
+      << "\"gerbicz_boundary_us_max\":" << r.production_stats.boundary_max_us << ","
+      << "\"gerbicz_full_check_us_min\":" << r.production_stats.full_check_min_us << ","
+      << "\"gerbicz_full_check_us_max\":" << r.production_stats.full_check_max_us << ","
+      << "\"production_prp_us_per_iter_min\":" << r.production_stats.production_min_us << ","
+      << "\"production_prp_us_per_iter_max\":" << r.production_stats.production_max_us << ","
       << "\"production_prp_us_per_iter\":" << r.production_us_per_iter << ","
       << "\"delta_vs_auto_pct\":" << r.delta_vs_auto_pct
       << "}";
@@ -1324,8 +1363,9 @@ std::string csv_header() {
     return "schema_version,mode,exponent,device_index,device_vendor,device_name,"
            "status,error,request,resolved_plan,active_plan,backend,auto_baseline,"
            "legal,duplicate,exact_match,production_probe_exact,best_exact,residue_hash,"
-           "transform_words,transform_mwords,bpw,setup_ms,us_per_iter_median,"
-           "us_per_iter_min,us_per_iter_max,production_prp_us_per_iter,delta_vs_auto_pct";
+           "transform_words,transform_mwords,bpw,setup_ms,"
+           "production_timing_method,production_probe_repetitions,gerbicz_boundary_us_min,gerbicz_boundary_us_max,gerbicz_full_check_us_min,gerbicz_full_check_us_max,production_prp_us_per_iter_min,production_prp_us_per_iter_max,"
+           "us_per_iter_median,us_per_iter_min,us_per_iter_max,production_prp_us_per_iter,delta_vs_auto_pct";
 }
 
 std::string row_csv(const PointResult& p, const PlanResult& r, const ModeConfig& cfg) {
@@ -1342,6 +1382,14 @@ std::string row_csv(const PointResult& p, const PlanResult& r, const ModeConfig&
       << (r.production_probe_exact ? 1 : 0) << ',' << (r.best_exact ? 1 : 0) << ','
       << csv_escape(r.residue_hash) << ',' << r.transform_words << ','
       << r.transform_mwords << ',' << r.bpw << ',' << r.setup_ms << ','
+      << core::bench::kProductionTimingMethod << ','
+      << r.production_stats.repetitions << ','
+      << r.production_stats.boundary_min_us << ','
+      << r.production_stats.boundary_max_us << ','
+      << r.production_stats.full_check_min_us << ','
+      << r.production_stats.full_check_max_us << ','
+      << r.production_stats.production_min_us << ','
+      << r.production_stats.production_max_us << ','
       << r.us_median << ',' << r.us_min << ',' << r.us_max << ','
       << r.production_us_per_iter << ',' << r.delta_vs_auto_pct;
     return o.str();
@@ -1484,8 +1532,8 @@ int run(const io::CliOptions& options) {
         options.bench3_output.empty()
             ? std::filesystem::path("bench3-results")
             : std::filesystem::path(options.bench3_output);
-    const auto record_dir = out_dir / "records";
-    const auto partial_root = out_dir / "partial";
+    const auto record_dir = out_dir / "records" / core::bench::kProductionTimingMethod;
+    const auto partial_root = out_dir / "partial" / core::bench::kProductionTimingMethod;
 
     std::signal(SIGINT, signal_handler);
 #ifdef SIGTERM
