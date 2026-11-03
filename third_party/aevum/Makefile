@@ -850,3 +850,11 @@ $(PER_FFT_CONFIG_PARSE_TEST): tests/per_fft_config_parse_test.cpp $(ENGINE_OBJS)
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc \
 		tests/per_fft_config_parse_test.cpp $(ENGINE_OBJS) \
 		$(OPENCL_LIBS) $(DL_LIBS) -o $@
+
+# PR260: compile the production GF61 tail reverse16 selection helper with
+# lightweight device/config stubs, covering explicit overrides and non-targets.
+# No GPU or OpenCL runtime is required.
+.PHONY: test-tail-gf61-reverse16-policy
+test-host: test-tail-gf61-reverse16-policy
+test-tail-gf61-reverse16-policy:
+	CXX="$(CXX)" bash tests/tail_gf61_reverse16_policy_test.sh .
