@@ -95,7 +95,7 @@ Keep at least 15 GiB free on downstream validation hosts.
 
    Use `--backend cuda` for CUDA and optionally `--fft SPEC` for an explicit
    legal factor-3-safe plan. The harness requires the actual reported backend,
-   compares matching FFT plans and full exported residues for M269 at B1=100
+   compares matching FFT plans and full exported residues for M1362763 at B1=100
    and B1=2141, injects an error and checks detection/fallback/recovery, and
    checks the three-register low-memory path. Logs and exports are retained.
    Timeouts, missing exports, silent backend fallback and mismatches fail.

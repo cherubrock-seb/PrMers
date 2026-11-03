@@ -44,7 +44,7 @@ def run(name, b1, flag, extra=(), inject=False):
     env = os.environ.copy()
     env.update(PRMERS_PM1_AEVUM_BASE3=str(flag), AEVUM_BACKEND=args.backend,
                AEVUM_AUTOTUNE="off", AEVUM_CARRY_WMUL="1")
-    command = [str(binary), "269", "-pm1", "-b1", str(b1), "-b2", str(b1),
+    command = [str(binary), "1362763", "-pm1", "-b1", str(b1), "-b2", str(b1),
                "-aevum", "-checklevel", "1", "-resume", "-noask",
                "-d", args.device, "-f", str(directory), *extra]
     if args.fft:
@@ -69,7 +69,7 @@ def run(name, b1, flag, extra=(), inject=False):
             raise RuntimeError(f"{name}: injection, detection or fallback missing")
     elif mismatch in text or fallback in text:
         raise RuntimeError(f"{name}: unexpected verification failure")
-    export = directory / f"resume_p269_B1_{b1}.save"
+    export = directory / f"resume_p1362763_B1_{b1}.save"
     content = export.read_text(encoding="utf-8")
     values = re.findall(r"\bX=0x([0-9a-fA-F]+)\b", content)
     if len(values) != 1:
