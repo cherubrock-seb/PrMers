@@ -695,6 +695,13 @@ test-llsafe2-result: all
 test-error-check-retry:
 	bash tests/test_error_check_retry.sh
 
+.PHONY: test-llsafe-norm-square
+# Pure host arithmetic regression; no OpenCL device is required.
+test-llsafe-norm-square:
+	@tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	$(CXX) -std=c++20 -Iinclude -Wall -Wextra -Werror tests/llsafe_norm_square_test.cpp -o "$$tmp/llsafe_norm_square_test" && \
+	"$$tmp/llsafe_norm_square_test"
+
 .PHONY: test-llsafe-error-recovery
 test-llsafe-error-recovery: all
 	bash tests/run_llsafe_error_recovery_regression.sh $${AEVUM_TEST_DEVICE:-0}

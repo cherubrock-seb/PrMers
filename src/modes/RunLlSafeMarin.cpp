@@ -8,6 +8,7 @@
 #include "core/ProofSet.hpp"
 #include "core/ProofSetMarin.hpp"
 #include "math/Carry.hpp"
+#include "math/LlSafeNormSquare.hpp"
 #include "util/GmpUtils.hpp"
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
@@ -19,6 +20,7 @@
 #include "core/ErrorCheckRetry.hpp"
 #include <sys/stat.h>
 #include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <future>
 #ifndef CL_TARGET_OPENCL_VERSION
@@ -472,6 +474,8 @@ int App::runLlSafeMarin()
 
     const uint32_t p = static_cast<uint32_t>(options.exponent);
     const bool verbose = true;
+    bool use_norm_square = prmers::llsafe::parse_norm_square_flag(
+        std::getenv("PRMERS_LLSAFE_NORM_SQUARE"));
 
     // LL-SAFE's paired-complex recurrence executes square_mul(..., 3), so an
     // FFT plan that is safe for ordinary LL squaring may not have enough
@@ -608,6 +612,11 @@ int App::runLlSafeMarin()
         eng->mul(static_cast<engine::Reg>(B), static_cast<engine::Reg>(RM0), static_cast<uint32_t>(2));
     };
 
+    auto pair_has_unit_norm = [&](size_t A, size_t B) {
+        return prmers::llsafe::has_unit_norm(
+            *eng, A, B, RTa, RTb, RM0);
+    };
+
     auto pair_mul_by = [&](size_t A, size_t B, size_t C, size_t D){
         eng->set_multiplicand(static_cast<engine::Reg>(RM0), static_cast<engine::Reg>(C));
         eng->set_multiplicand(static_cast<engine::Reg>(RM1), static_cast<engine::Reg>(D));
@@ -674,6 +683,20 @@ int App::runLlSafeMarin()
         eng->copy(static_cast<engine::Reg>(RSAVE_R_B), static_cast<engine::Reg>(RRES_B));
         eng->copy(static_cast<engine::Reg>(RSAVE_F_A), static_cast<engine::Reg>(RACC_A));
         eng->copy(static_cast<engine::Reg>(RSAVE_F_B), static_cast<engine::Reg>(RACC_B));
+    }
+
+    // A fresh (2,1) pair has norm one. A checkpoint must establish that
+    // invariant for both the live pair and the state used by rollback.
+    if (use_norm_square && r == 0 &&
+        (!pair_has_unit_norm(RRES_A, RRES_B) ||
+         !pair_has_unit_norm(RSAVE_R_A, RSAVE_R_B))) {
+        use_norm_square = false;
+        std::cout << "[LL-SAFE norm square] Checkpoint norm check failed; "
+                     "using general pair squares." << std::endl;
+    }
+    if (use_norm_square) {
+        std::cout << "[LL-SAFE norm square] Experimental path enabled; "
+                     "general checker and norm checks retained." << std::endl;
     }
 
     eng->set(static_cast<engine::Reg>(RBASE_A), static_cast<uint32_t>(2));
@@ -748,7 +771,11 @@ int App::runLlSafeMarin()
             eng->copy(static_cast<engine::Reg>(RPREV_A), static_cast<engine::Reg>(RRES_A));
             eng->copy(static_cast<engine::Reg>(RPREV_B), static_cast<engine::Reg>(RRES_B));
         }
-        pair_square(RRES_A, RRES_B);
+        if (use_norm_square) {
+            prmers::llsafe::square_unit_norm(*eng, RRES_A, RRES_B, RM0);
+        } else {
+            pair_square(RRES_A, RRES_B);
+        }
 
         auto now = std::chrono::high_resolution_clock::now();
         if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 10) {
@@ -777,7 +804,15 @@ int App::runLlSafeMarin()
         else { pair_square(RCHK_A, RCHK_B); pair_mul_by(RCHK_A, RCHK_B, RBASE_A, RBASE_B); }
         for (uint64_t z = 0; z < modB; ++z) pair_square(RCHK_A, RCHK_B);
 
-        if (!pair_equal(RCHK_A, RCHK_B, RACC_A, RACC_B)) {
+        // Keep the checker on general pair arithmetic. Accept a specialized
+        // block only if its live state also retains the required norm.
+        if (!pair_equal(RCHK_A, RCHK_B, RACC_A, RACC_B) ||
+            (use_norm_square && !pair_has_unit_norm(RRES_A, RRES_B))) {
+            if (use_norm_square) {
+                use_norm_square = false;
+                std::cout << "[LL-SAFE norm square] Verification failed; "
+                             "using general pair squares for recovery." << std::endl;
+            }
             uint64_t blk_start = (itersave + 1);
             uint64_t blk_end = (iter + 1);
             std::cout << "[Gerbicz-Li] Check FAILED at iter=" << (iter + 1) << " block=[" << blk_start << ".." << blk_end << "]" << std::endl;
