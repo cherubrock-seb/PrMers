@@ -698,9 +698,9 @@ test-error-check-retry:
 .PHONY: test-llsafe-norm-square
 # Pure host arithmetic regression; no OpenCL device is required.
 test-llsafe-norm-square:
-	@tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT; \
-	$(CXX) -std=c++20 -Iinclude -Wall -Wextra -Werror tests/llsafe_norm_square_test.cpp -o "$tmp/llsafe_norm_square_test" && \
-	"$tmp/llsafe_norm_square_test"
+	@tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	$(CXX) -std=c++20 -Iinclude -Wall -Wextra -Werror tests/llsafe_norm_square_test.cpp -o "$$tmp/llsafe_norm_square_test" && \
+	"$$tmp/llsafe_norm_square_test"
 
 .PHONY: test-llsafe-error-recovery
 test-llsafe-error-recovery: all
