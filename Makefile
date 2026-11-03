@@ -567,6 +567,13 @@ test-pm1-stage1-ckpt: all
 test-pm1-nk-stage2-b2: all
 	bash tests/pm1_nk_stage2_with_b2_test.sh $${PRMERS_TEST_DEVICE:-0}
 
+.PHONY: test-pm1-aevum-base3
+# Pure host arithmetic and eligibility regression; no OpenCL device is required.
+test-pm1-aevum-base3:
+	@tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	$(CXX) -std=c++20 -Iinclude -Wall -Wextra -Werror tests/pm1_aevum_base3_test.cpp -o "$$tmp/pm1_aevum_base3_test" && \
+	"$$tmp/pm1_aevum_base3_test"
+
 test-pm1-stage1-checklevel: all
 	bash tests/pm1_stage1_checklevel_test.sh $${PRMERS_TEST_DEVICE:-0}
 
