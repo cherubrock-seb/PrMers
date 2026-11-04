@@ -38,6 +38,16 @@ void checkSource() {
   const auto has = [](const std::string& text, const char* needle) {
     return text.find(needle) != std::string::npos;
   };
+  const auto section = [&](const char* begin, const char* end) {
+    const auto first = fftw.find(begin);
+    require(first != std::string::npos, std::string("missing source section: ") + begin);
+    const auto last = fftw.find(end, first + 1);
+    require(last != std::string::npos, std::string("missing source section terminator: ") + end);
+    return fftw.substr(first, last - first);
+  };
+  const std::string fp32 = section("#if FFT_FP32", "#if NTT_GF31");
+  const std::string gf31 = section("KERNEL(G_W) fftWGF31", "#if NTT_GF61");
+  const std::string gf61 = section("KERNEL(G_W) fftWGF61", "#if defined(AEVUM_APPLE_OPENCL12)");
   const std::string step =
       "const u32 outStep = PFA_LOGICAL_STEP / (2u * BIG_HEIGHT);";
 
@@ -61,6 +71,20 @@ void checkSource() {
           "GF31 even destination missing");
   require(has(fftw, "outScalar61[outOdd  * 2u]      = u[i].x;"),
           "GF61 odd destination missing");
+  require(!has(fp32, step.c_str()),
+          "PFA recurrence leaked into the FP32 CRT scatter");
+  require(has(gf31, "#if NVIDIAGPU\n"),
+          "GF31 recurrence is not scoped to fftWGF31");
+  require(has(gf31, "outScalar31[outEven * 2u + 1u] = u[i].y;"),
+          "GF31 recurrence destination is not scoped to fftWGF31");
+  require(!has(gf31, "outScalar61[outEven"),
+          "GF61 recurrence leaked into fftWGF31");
+  require(has(gf61, "#if NVIDIAGPU && (PFA_RADIX == 7 || PFA_RADIX == 9)"),
+          "GF61 recurrence is not scoped to fftWGF61");
+  require(has(gf61, "outScalar61[outEven * 2u + 1u] = u[i].y;"),
+          "GF61 recurrence destination is not scoped to fftWGF61");
+  require(!has(gf61, "outScalar31[outEven"),
+          "GF31 recurrence leaked into fftWGF61");
 
   const auto first = fftw.find(step);
   require(first != std::string::npos && fftw.find(step, first + 1) != std::string::npos,
