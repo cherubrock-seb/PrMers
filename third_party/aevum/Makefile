@@ -851,6 +851,18 @@ $(PER_FFT_CONFIG_PARSE_TEST): tests/per_fft_config_parse_test.cpp $(ENGINE_OBJS)
 		tests/per_fft_config_parse_test.cpp $(ENGINE_OBJS) \
 		$(OPENCL_LIBS) $(DL_LIBS) -o $@
 
+# Host-only Good-Thomas/PFA fftW scatter recurrence vs. canonical mapping.
+# Verify production guards, the mathematical permutation and collision freedom.
+PFA_SCATTER_RECURRENCE_MODEL_TEST := build-tests/aevum-pfa-scatter-recurrence-model-test
+.PHONY: test-pfa-scatter-recurrence-model
+test-host: test-pfa-scatter-recurrence-model
+test-pfa-scatter-recurrence-model: $(PFA_SCATTER_RECURRENCE_MODEL_TEST)
+	$(PFA_SCATTER_RECURRENCE_MODEL_TEST)
+
+$(PFA_SCATTER_RECURRENCE_MODEL_TEST): tests/pfa_scatter_recurrence_model_test.cpp src/cl/fftw.cl src/Gpu.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra tests/pfa_scatter_recurrence_model_test.cpp -o $@
+
 # PR260: compile the production GF61 tail reverse16 selection helper with
 # lightweight device/config stubs, covering explicit overrides and non-targets.
 # No GPU or OpenCL runtime is required.
