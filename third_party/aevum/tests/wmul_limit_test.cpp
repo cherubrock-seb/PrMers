@@ -40,6 +40,39 @@ static bool parseExplicitWmul(const std::string& text, uint32_t& value) {
   return true;
 }
 
+static void expectTunerWmulBaselineWiring() {
+  std::ifstream input("src/tune.cpp");
+  if (!input) {
+    std::printf("FAIL cannot read src/tune.cpp for WMUL tuner source contract\n");
+    ++failures;
+    return;
+  }
+
+  std::ostringstream buffer;
+  buffer << input.rdbuf();
+  const std::string source = buffer.str();
+
+  const char* required[] = {
+      "u32 const current_effective_wmul = wmul_limit::clampWmul(current_wmul, max_wmul, big_h);",
+      "if (wmul == current_effective_wmul) current_cost = cost;",
+      "if (current_cost < 0.0) {",
+      "args->flags[\"WMUL\"] = to_string(current_wmul);",
+      "best_wmul = current_effective_wmul;",
+  };
+
+  for (const char* token : required) {
+    if (source.find(token) == std::string::npos) {
+      std::printf("FAIL tune.cpp WMUL baseline source contract missing token: %s\n", token);
+      ++failures;
+    }
+  }
+
+  if (source.find("if (wmul <= current_wmul) current_cost = cost;") != std::string::npos) {
+    std::printf("FAIL tune.cpp still approximates the current WMUL baseline with the largest smaller search candidate\n");
+    ++failures;
+  }
+}
+
 static void expectGpuParserWiring() {
   std::ifstream input("src/Gpu.cpp");
   if (!input) {
@@ -90,11 +123,14 @@ int main() {
     expectBool("explicit wmul empty rejected", parseExplicitWmul("", parsed), false);
     expectBool("explicit wmul 1 accepted", parseExplicitWmul("1", parsed), true);
     expect("explicit wmul 1 value", parsed, 1);
+    expectBool("explicit wmul 3 accepted", parseExplicitWmul("3", parsed), true);
+    expect("explicit wmul 3 value", parsed, 3);
     expectBool("explicit wmul 4 accepted", parseExplicitWmul("4", parsed), true);
     expect("explicit wmul 4 value", parsed, 4);
   }
 
   expectGpuParserWiring();
+  expectTunerWmulBaselineWiring();
 
   // The default is unchanged where it fits.  AMD: 1024 threads, 64KB local memory.  NVIDIA: 1024 threads, 48KB.
   expect("amd 512 wmul2",   effective(2, 512,  4, 4096, 8, 65536, 1024), 2);

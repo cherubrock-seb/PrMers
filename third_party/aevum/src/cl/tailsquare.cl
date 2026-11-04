@@ -733,6 +733,16 @@ KERNEL(G_H) tailSquareZeroGF31(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TR
   const u32 binary_line = line;
   const bool bump = !which;
 #endif
+
+#if PFA_RADIX
+  // In double-wide trig tables the two special binary lines occupy pair-0
+  // slots 0 and 1 for every Good-Thomas row.  `which` includes the row and
+  // must not be used as a trig-table slot.
+  const u32 doublewide_trig_slot = upper ? 1u : 0u;
+#else
+  const u32 doublewide_trig_slot = which;
+#endif
+
   u32 me = get_local_id(0);
 
   dependentLaunch();       // Next kernel will be tailSquareGF31 which must dependentLaunchWait before reading data from fftMiddleInGF31
@@ -748,14 +758,14 @@ KERNEL(G_H) tailSquareZeroGF31(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TR
 #if SINGLE_WIDE
   GF31 mult = TSLOAD(&smallTrig31[height_trigs + G_H + binary_line]);
 #else
-  GF31 mult = TSLOAD(&smallTrig31[height_trigs + G_H + which]);
+  GF31 mult = TSLOAD(&smallTrig31[height_trigs + G_H + doublewide_trig_slot]);
 #endif
   trig = cmul(trig, mult);
 #else
 #if SINGLE_WIDE
   GF31 trig = TOLOAD(&smallTrig31[height_trigs + binary_line*G_H + me]);
 #else
-  GF31 trig = TOLOAD(&smallTrig31[height_trigs + which*G_H + me]);
+  GF31 trig = TOLOAD(&smallTrig31[height_trigs + doublewide_trig_slot*G_H + me]);
 #endif
 #endif
 
@@ -895,12 +905,23 @@ KERNEL(G_H * 2) tailSquareGF31(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TR
 
   u32 H = ND / SMALL_HEIGHT;
 
-#if SINGLE_KERNEL
+#if PFA_RADIX
+  // Good-Thomas odd rows remain self-paired. One double-wide workgroup
+  // owns one binary-line pair in one row; each half-workgroup owns one line.
+  const u32 per_row = WIDTH / 2u - 1u;
+  const u32 group = get_group_id(0);
+  const u32 row = group / per_row;
+  const u32 binary_line = group - row * per_row + 1u;
+  const u32 line_u = row * WIDTH + binary_line;
+  const u32 line_v = row * WIDTH + (WIDTH - binary_line);
+#elif SINGLE_KERNEL
   u32 line_u = get_group_id(0);
   u32 line_v = line_u ? H - line_u : (H / 2);
+  const u32 binary_line = line_u;
 #else
   u32 line_u = get_group_id(0) + 1;
   u32 line_v = H - line_u;
+  const u32 binary_line = line_u;
 #endif
 
   u32 me = get_local_id(0);
@@ -926,7 +947,7 @@ KERNEL(G_H * 2) tailSquareGF31(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TR
   u32 height_trigs = SMALL_HEIGHT*1;
   // Read a hopefully cached line of data and one non-cached GF31 per line
   GF31 trig = TFLOAD(&smallTrig31[height_trigs + lowMe]);                                 // Trig values for line zero, should be cached
-  GF31 mult = TSLOAD(&smallTrig31[height_trigs + G_H + line_u*2 + isSecondHalf]);         // Two multipliers.  One for line u, one for line v.
+  GF31 mult = TSLOAD(&smallTrig31[height_trigs + G_H + binary_line*2 + isSecondHalf]);         // Two multipliers.  One for line u, one for line v.
   trig = cmul(trig, mult);
 
   // On consumer-grade GPUs, it is likely beneficial to read all trig values.
@@ -935,7 +956,7 @@ KERNEL(G_H * 2) tailSquareGF31(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TR
   // The trig values used here are pre-computed and stored after the fft_HEIGHT trig values.
   u32 height_trigs = SMALL_HEIGHT*1;
   // Read pre-computed trig values
-  GF31 trig = TOLOAD(&smallTrig31[height_trigs + line_u*G_H*2 + me]);
+  GF31 trig = TOLOAD(&smallTrig31[height_trigs + binary_line*G_H*2 + me]);
 #endif
 
 #if SINGLE_KERNEL
@@ -1109,6 +1130,16 @@ KERNEL(G_H) tailSquareZeroGF61(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TR
   const u32 binary_line = line;
   const bool bump = !which;
 #endif
+
+#if PFA_RADIX
+  // In double-wide trig tables the two special binary lines occupy pair-0
+  // slots 0 and 1 for every Good-Thomas row.  `which` includes the row and
+  // must not be used as a trig-table slot.
+  const u32 doublewide_trig_slot = upper ? 1u : 0u;
+#else
+  const u32 doublewide_trig_slot = which;
+#endif
+
   u32 me = get_local_id(0);
 
   dependentLaunch();       // Next kernel will be tailSquareGF61 which must dependentLaunchWait before reading data from fftMiddleInGF61
@@ -1124,14 +1155,14 @@ KERNEL(G_H) tailSquareZeroGF61(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TR
 #if SINGLE_WIDE
   GF61 mult = TSLOAD(&smallTrig61[height_trigs + G_H + binary_line]);
 #else
-  GF61 mult = TSLOAD(&smallTrig61[height_trigs + G_H + which]);
+  GF61 mult = TSLOAD(&smallTrig61[height_trigs + G_H + doublewide_trig_slot]);
 #endif
   trig = cmul(trig, mult);
 #else
 #if SINGLE_WIDE
   GF61 trig = TOLOAD(&smallTrig61[height_trigs + binary_line*G_H + me]);
 #else
-  GF61 trig = TOLOAD(&smallTrig61[height_trigs + which*G_H + me]);
+  GF61 trig = TOLOAD(&smallTrig61[height_trigs + doublewide_trig_slot*G_H + me]);
 #endif
 #endif
 
@@ -1802,12 +1833,23 @@ KERNEL(G_H * 2) tailSquareGF61(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TR
 
   u32 H = ND / SMALL_HEIGHT;
 
-#if SINGLE_KERNEL
+#if PFA_RADIX
+  // Good-Thomas odd rows remain self-paired. One double-wide workgroup
+  // owns one binary-line pair in one row; each half-workgroup owns one line.
+  const u32 per_row = WIDTH / 2u - 1u;
+  const u32 group = get_group_id(0);
+  const u32 row = group / per_row;
+  const u32 binary_line = group - row * per_row + 1u;
+  const u32 line_u = row * WIDTH + binary_line;
+  const u32 line_v = row * WIDTH + (WIDTH - binary_line);
+#elif SINGLE_KERNEL
   u32 line_u = get_group_id(0);
   u32 line_v = line_u ? H - line_u : (H / 2);
+  const u32 binary_line = line_u;
 #else
   u32 line_u = get_group_id(0) + 1;
   u32 line_v = H - line_u;
+  const u32 binary_line = line_u;
 #endif
 
   u32 me = get_local_id(0);
@@ -1821,7 +1863,7 @@ KERNEL(G_H * 2) tailSquareGF61(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TR
   dependentLaunchWait();   // Previous kernel was fftMiddleInGF61 that launched dependents before writing GF61 data
 
 #if TAIL_TRIGS61 == 0
-  GF61 trig_prefetch = TOLOAD(&smallTrig61[SMALL_HEIGHT + line_u*G_H*2 + me]);
+  GF61 trig_prefetch = TOLOAD(&smallTrig61[SMALL_HEIGHT + binary_line*G_H*2 + me]);
 #endif
 
   // Read lines u and v
@@ -1837,7 +1879,7 @@ KERNEL(G_H * 2) tailSquareGF61(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TR
   u32 height_trigs = SMALL_HEIGHT*1;
   // Read a hopefully cached line of data and one non-cached GF61 per line
   GF61 trig = TFLOAD(&smallTrig61[height_trigs + lowMe]);                                 // Trig values for line zero, should be cached
-  GF61 mult = TSLOAD(&smallTrig61[height_trigs + G_H + line_u*2 + isSecondHalf]);         // Two multipliers.  One for line u, one for line v.
+  GF61 mult = TSLOAD(&smallTrig61[height_trigs + G_H + binary_line*2 + isSecondHalf]);         // Two multipliers.  One for line u, one for line v.
   trig = cmul(trig, mult);
 
   // On consumer-grade GPUs, it is likely beneficial to read all trig values.
