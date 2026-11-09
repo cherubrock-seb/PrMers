@@ -545,6 +545,42 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 widthRadi
   config.try_emplace("PAD", "0");
 #endif
 
+  // Radeon VII/gfx906: automatically select the formally validated PFA3
+  // production policy only for the qualified FFT3161 geometry.  This combines
+  // the row-aware double-wide GF31/GF61 square tail with the validated
+  // WG256/SIZEX8 middle-out layout and non-temporal FFT loads/stores.
+  // PFA7 remains available through explicit settings but is not auto-enabled.
+  //
+  // Keeping this before the generic PFA defaults preserves explicit
+  // per-key configuration and companion-policy precedence.
+  const bool pfa3_doublewide_gfx906_geometry =
+      fft.isPfa() &&
+      fft.pfa_radix == 3 &&
+      fft.shape.fft_type == FFT3161 &&
+      fft.NTT_GF31 && fft.NTT_GF61 &&
+      fft.shape.width == 256 &&
+      fft.shape.middle == 3 &&
+      fft.shape.height == 512 &&
+      fft.variant == 101;
+
+  const bool pfa3_doublewide_gfx906_default =
+      pfa3_doublewide_gfx906_geometry &&
+      !config.count("TAIL_KERNELS") &&
+      getDeviceName(id).rfind("gfx906", 0) == 0;
+
+  if (pfa3_doublewide_gfx906_default) {
+    config["TAIL_KERNELS"] = "3";
+    config.try_emplace("OUT_WG", "256");
+    config.try_emplace("OUT_SIZEX", "8");
+    config.try_emplace("MIDDLE_OUT_LDS_TRANSPOSE", "1");
+    config.try_emplace("LOADS", "1");
+    config.try_emplace("STORES", "1");
+  }
+
+  if (doLog && pfa3_doublewide_gfx906_default)
+    log("Validated gfx906 PFA3 production defaults: TAIL_KERNELS=3, OUT_WG=256, OUT_SIZEX=8, MIDDLE_OUT_LDS_TRANSPOSE=1, LOADS=1, STORES=1, plan=%s; explicit per-key settings retain priority.\n",
+        fft.spec().c_str());
+
   // Correctness-first PFA defaults.  Explicit engine configuration (for
   // example AEVUM_PFA_USE after exact validation) has higher priority and
   // can benchmark the existing upstream tail variants without rebuilding.
@@ -1367,7 +1403,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   K(kfftHinGF31,           "ffthin.cl",  "fftHinGF31",  hN / nH, kernelDefines(K31).c_str()),
   K(ktailSquareZeroGF31,   "tailsquare.cl", "tailSquareZeroGF31", SMALL_H / nH * 2 * (fft.isPfa() ? fft.pfa_radix : 1), kernelDefines(K31).c_str()),
   K(ktailSquareGF31,       "tailsquare.cl", "tailSquareGF31",
-                                               !tail_single_wide && !tail_single_kernel ? hN / nH - SMALL_H / nH * 2 : // Double-wide tailSquare with two kernels
+                                               !tail_single_wide && !tail_single_kernel ? hN / nH - SMALL_H / nH * 2 * (fft.isPfa() ? fft.pfa_radix : 1) : // Double-wide tailSquare with two kernels
                                                !tail_single_wide ? hN / nH :                                           // Double-wide tailSquare with one kernel
                                                !tail_single_kernel ? hN / nH / 2 - SMALL_H / nH * (fft.isPfa() ? fft.pfa_radix : 1) : // Single-wide, two kernels
                                                hN / nH / 2, (kernelDefines(K31) + numCudaRegisters(TAIL31)).c_str()),  // Single-wide tailSquare with one kernel
@@ -1392,7 +1428,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   K(ktailSquareGF61,       "tailsquare.cl", "tailSquareGF61ApplePlaceholder", SMALL_H / nH, kernelDefines(K61).c_str()),
 #else
   K(ktailSquareGF61,       "tailsquare.cl", "tailSquareGF61",
-                                               !tail_single_wide && !tail_single_kernel ? hN / nH - SMALL_H / nH * 2 : // Double-wide tailSquare with two kernels
+                                               !tail_single_wide && !tail_single_kernel ? hN / nH - SMALL_H / nH * 2 * (fft.isPfa() ? fft.pfa_radix : 1) : // Double-wide tailSquare with two kernels
                                                !tail_single_wide ? hN / nH :                                           // Double-wide tailSquare with one kernel
                                                !tail_single_kernel ? hN / nH / 2 - SMALL_H / nH * (fft.isPfa() ? fft.pfa_radix : 1) : // Single-wide, two kernels
                                                hN / nH / 2,
