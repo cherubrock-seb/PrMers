@@ -581,6 +581,25 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 widthRadi
     log("Validated gfx906 PFA3 production defaults: TAIL_KERNELS=3, OUT_WG=256, OUT_SIZEX=8, MIDDLE_OUT_LDS_TRANSPOSE=1, LOADS=1, STORES=1, plan=%s; explicit per-key settings retain priority.\n",
         fft.spec().c_str());
 
+  const bool pfa7_doublewide_gfx906_default =
+      fft.isPfa() &&
+      fft.pfa_radix == 7 &&
+      fft.shape.fft_type == FFT3161 &&
+      fft.NTT_GF31 && fft.NTT_GF61 &&
+      fft.shape.width == 512 &&
+      fft.shape.middle == 7 &&
+      fft.shape.height == 512 &&
+      fft.variant == 202 &&
+      !config.count("TAIL_KERNELS") &&
+      getDeviceName(id).rfind("gfx906", 0) == 0;
+
+  if (pfa7_doublewide_gfx906_default)
+    config["TAIL_KERNELS"] = "3";
+
+  if (doLog && pfa7_doublewide_gfx906_default)
+    log("Validated gfx906 PFA7 production default: TAIL_KERNELS=3, plan=%s; explicit TAIL_KERNELS retains priority.\n",
+        fft.spec().c_str());
+
   // Correctness-first PFA defaults.  Explicit engine configuration (for
   // example AEVUM_PFA_USE after exact validation) has higher priority and
   // can benchmark the existing upstream tail variants without rebuilding.
