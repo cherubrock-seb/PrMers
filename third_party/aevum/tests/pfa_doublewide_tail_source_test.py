@@ -188,7 +188,9 @@ print(
 # PFA7 changes only TAIL_KERNELS.
 policy_tokens = (
     "const bool pfa3_doublewide_gfx906_geometry =",
+    "const bool pfa7_doublewide_geometry =",
     "const bool pfa7_doublewide_gfx906_default =",
+    "const bool pfa7_doublewide_rtx3080_opencl_default =",
     'config["TAIL_KERNELS"] = "3"',
     'config.try_emplace("TAIL_KERNELS", "1")',
 )
@@ -199,11 +201,12 @@ for token in policy_tokens:
         sys.exit(1)
 
 pfa3_pos = gpu.find("const bool pfa3_doublewide_gfx906_geometry =")
-pfa7_pos = gpu.find("const bool pfa7_doublewide_gfx906_default =")
+pfa7_pos = gpu.find("const bool pfa7_doublewide_geometry =")
+rtx_pos = gpu.find("const bool pfa7_doublewide_rtx3080_opencl_default =")
 generic_pos = gpu.find('config.try_emplace("TAIL_KERNELS", "1")')
 
-if not (0 <= pfa3_pos < pfa7_pos < generic_pos):
-    print("FAIL: gfx906 PFA3/PFA7 TK3 policies must precede generic PFA default")
+if not (0 <= pfa3_pos < pfa7_pos < rtx_pos < generic_pos):
+    print("FAIL: hardware-scoped PFA3/PFA7 TK3 policies must precede generic PFA default")
     sys.exit(1)
 
 pfa3_block = gpu[pfa3_pos:pfa7_pos]
@@ -235,9 +238,13 @@ for token in (
     "fft.shape.middle == 7",
     "fft.shape.height == 512",
     "fft.variant == 202",
+    'pfa7_doublewide_geometry',
     '!config.count("TAIL_KERNELS")',
     'getDeviceName(id).rfind("gfx906", 0) == 0',
+    'getDeviceName(id) == "NVIDIA GeForce RTX 3080"',
+    '#if !defined(CUDA_BACKEND)',
     'config["TAIL_KERNELS"] = "3"',
+    "Validated RTX 3080 OpenCL PFA7 production default",
     "explicit TAIL_KERNELS retains priority",
 ):
     if token not in pfa7_block:
@@ -278,6 +285,9 @@ def policy_model(device, radix, width, middle, height, variant,
     if device.startswith("gfx906") and (pfa3 or pfa7):
         return 3
 
+    if device == "NVIDIA GeForce RTX 3080" and pfa7:
+        return 3
+
     return 1
 
 
@@ -285,6 +295,7 @@ assert policy_model("gfx906", 3, 256, 3, 512, 101) == 3
 assert policy_model("gfx906:sramecc+", 3, 256, 3, 512, 101) == 3
 assert policy_model("gfx906", 7, 512, 7, 512, 202) == 3
 assert policy_model("gfx906:sramecc+:xnack-", 7, 512, 7, 512, 202) == 3
+assert policy_model("NVIDIA GeForce RTX 3080", 7, 512, 7, 512, 202) == 3
 
 # Explicit user/tuner selections retain priority.
 assert policy_model(
@@ -293,6 +304,9 @@ assert policy_model(
 assert policy_model(
     "gfx906", 7, 512, 7, 512, 202, explicit_tail=0
 ) == 0
+assert policy_model(
+    "NVIDIA GeForce RTX 3080", 7, 512, 7, 512, 202, explicit_tail=1
+) == 1
 
 # Negative scope.
 assert policy_model("gfx1100", 3, 256, 3, 512, 101) == 1
@@ -302,10 +316,14 @@ assert policy_model("gfx906", 7, 512, 7, 256, 202) == 1
 assert policy_model("gfx906", 7, 1024, 7, 512, 202) == 1
 assert policy_model("gfx906", 7, 512, 8, 512, 202) == 1
 assert policy_model("gfx906", 7, 512, 7, 512, 101) == 1
+assert policy_model("NVIDIA GeForce RTX 3080", 3, 256, 3, 512, 101) == 1
+assert policy_model("NVIDIA GeForce RTX 3080", 7, 512, 7, 256, 202) == 1
+assert policy_model("NVIDIA GeForce RTX 3080", 7, 1024, 7, 512, 202) == 1
+assert policy_model("NVIDIA GeForce RTX 4070 Ti SUPER", 7, 512, 7, 512, 202) == 1
 
 print(
-    "ok: gfx906 automatic double-wide policy is restricted to "
-    "production-qualified PFA3/PFA7 geometries and preserves explicit TAIL_KERNELS"
+    "ok: automatic double-wide policy is restricted to production-qualified "
+    "gfx906 PFA3/PFA7 and RTX 3080 OpenCL PFA7 scope and preserves explicit TAIL_KERNELS"
 )
 
 
@@ -334,7 +352,10 @@ def production_policy_model(device, radix, width, middle, height, variant,
     )
     pfa7_auto = (
         pfa7
-        and device.startswith("gfx906")
+        and (
+            device.startswith("gfx906")
+            or device == "NVIDIA GeForce RTX 3080"
+        )
         and "TAIL_KERNELS" not in config
     )
 
@@ -374,6 +395,12 @@ qualified_pfa7 = production_policy_model(
 )
 assert qualified_pfa7 == {"TAIL_KERNELS": "3"}
 
+qualified_rtx3080_pfa7 = production_policy_model(
+    "NVIDIA GeForce RTX 3080",
+    7, 512, 7, 512, 202,
+)
+assert qualified_rtx3080_pfa7 == {"TAIL_KERNELS": "3"}
+
 # Explicit per-key settings retain priority while the remaining PFA3 defaults
 # are still supplied.
 explicit_layout = production_policy_model(
@@ -403,6 +430,10 @@ assert production_policy_model(
     "gfx906", 7, 512, 7, 512, 202,
     explicit={"TAIL_KERNELS": "1"},
 ) == {"TAIL_KERNELS": "1"}
+assert production_policy_model(
+    "NVIDIA GeForce RTX 3080", 7, 512, 7, 512, 202,
+    explicit={"TAIL_KERNELS": "1"},
+) == {"TAIL_KERNELS": "1"}
 
 # Negative scope keeps the generic safe tail default and receives no companion
 # policy.
@@ -413,10 +444,13 @@ for cfg in (
     production_policy_model("gfx906", 7, 512, 7, 256, 202),
     production_policy_model("gfx906", 7, 1024, 7, 512, 202),
     production_policy_model("gfx906", 7, 512, 8, 512, 202),
+    production_policy_model("NVIDIA GeForce RTX 3080", 3, 256, 3, 512, 101),
+    production_policy_model("NVIDIA GeForce RTX 3080", 7, 512, 7, 256, 202),
+    production_policy_model("NVIDIA GeForce RTX 4070 Ti SUPER", 7, 512, 7, 512, 202),
 ):
     assert cfg == {"TAIL_KERNELS": "1"}
 
 print(
-    "ok: validated gfx906 PFA3 companion defaults and PFA7 TK3 default are "
+    "ok: validated gfx906 PFA3/PFA7 and RTX 3080 OpenCL PFA7 TK3 defaults are "
     "exact-scope and preserve explicit configuration"
 )
