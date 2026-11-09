@@ -549,7 +549,7 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 widthRadi
   // production policy only for the qualified FFT3161 geometry.  This combines
   // the row-aware double-wide GF31/GF61 square tail with the validated
   // WG256/SIZEX8 middle-out layout and non-temporal FFT loads/stores.
-  // PFA7 remains available through explicit settings but is not auto-enabled.
+  // PFA7 automatic policy remains separately hardware- and geometry-scoped below.
   //
   // Keeping this before the generic PFA defaults preserves explicit
   // per-key configuration and companion-policy precedence.
@@ -581,7 +581,7 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 widthRadi
     log("Validated gfx906 PFA3 production defaults: TAIL_KERNELS=3, OUT_WG=256, OUT_SIZEX=8, MIDDLE_OUT_LDS_TRANSPOSE=1, LOADS=1, STORES=1, plan=%s; explicit per-key settings retain priority.\n",
         fft.spec().c_str());
 
-  const bool pfa7_doublewide_gfx906_default =
+  const bool pfa7_doublewide_geometry =
       fft.isPfa() &&
       fft.pfa_radix == 7 &&
       fft.shape.fft_type == FFT3161 &&
@@ -589,15 +589,35 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 widthRadi
       fft.shape.width == 512 &&
       fft.shape.middle == 7 &&
       fft.shape.height == 512 &&
-      fft.variant == 202 &&
+      fft.variant == 202;
+
+  const bool pfa7_doublewide_gfx906_default =
+      pfa7_doublewide_geometry &&
       !config.count("TAIL_KERNELS") &&
       getDeviceName(id).rfind("gfx906", 0) == 0;
 
-  if (pfa7_doublewide_gfx906_default)
+#if !defined(CUDA_BACKEND)
+  // RTX 3080 OpenCL: TAIL_KERNELS=3 is canonical-exact and repeatably faster
+  // on the exact validated PFA7 geometry.  Keep native CUDA and every other
+  // NVIDIA device/shape on the generic correctness-first default.
+  const bool pfa7_doublewide_rtx3080_opencl_default =
+      pfa7_doublewide_geometry &&
+      !config.count("TAIL_KERNELS") &&
+      isNvidiaGpu(id) &&
+      getDeviceName(id) == "NVIDIA GeForce RTX 3080";
+#else
+  const bool pfa7_doublewide_rtx3080_opencl_default = false;
+#endif
+
+  if (pfa7_doublewide_gfx906_default || pfa7_doublewide_rtx3080_opencl_default)
     config["TAIL_KERNELS"] = "3";
 
   if (doLog && pfa7_doublewide_gfx906_default)
     log("Validated gfx906 PFA7 production default: TAIL_KERNELS=3, plan=%s; explicit TAIL_KERNELS retains priority.\n",
+        fft.spec().c_str());
+
+  if (doLog && pfa7_doublewide_rtx3080_opencl_default)
+    log("Validated RTX 3080 OpenCL PFA7 production default: TAIL_KERNELS=3, plan=%s; explicit TAIL_KERNELS retains priority.\n",
         fft.spec().c_str());
 
   // Correctness-first PFA defaults.  Explicit engine configuration (for
