@@ -2772,6 +2772,20 @@ void OVERLOAD fft_common(local GF61 *lds, GF61 *u, TrigGF61 trig, u32 numWG, u32
 
   fft8(u);
 
+// NVIDIA PFA7 explicit GF61 stages
+// Code for SIZE=512, RADIX=8
+#elif NVIDIAGPU && PFA_RADIX == 7 && WG == 64 && RADIX == 8
+
+  fft8(u);
+  tabMul(trig, u, 1, lowMe);
+  shufl(lds, u, 1, numWG, lowMe);
+
+  fft8(u);
+  tabMul(trig, u, 8, lowMe);
+  shufl(lds, u, 8, numWG, lowMe);
+
+  fft8(u);
+
 // Code for SIZE=1024, RADIX=8
 #elif WG == 128 && RADIX == 8
 
